@@ -1,0 +1,4 @@
+addr: localhost:1234
+tls_key_file: tests/tls.key # Expect PKCS8 format.
+tls_cert_file: tests/tls.crt # Expect PEM.
+cookie_key_file: tests/cookie.key # TODO: store and read as pem files, or read bytes directly from file?

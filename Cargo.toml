@@ -5,3 +5,13 @@ authors = ["Watson Ladd <watson@cloudflare.com>"]
 edition = "2018"
 
 [dependencies]
+libc = "0.2.49"
+tokio =  "0.1.15"
+tokio-rustls = "0.10.0-alpha"
+rustls = "0.15.1"
+clap = "2.32.0"
+config = "0.9"
+futures = "0.1"
+miscreant="0.4.2"
+rand="0.6.5"
+

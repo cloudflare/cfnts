@@ -1,7 +1,7 @@
 [package]
 name = "nts"
 version = "0.1.0"
-authors = ["Watson Ladd <watson@cloudflare.com>"]
+authors = ["Watson Ladd <watson@cloudflare.com>", "Gabbi Fisher <gabbi@cloudflare.com>"]
 edition = "2018"
 
 [dependencies]
@@ -14,4 +14,10 @@ config = "0.9"
 futures = "0.1"
 miscreant="0.4.2"
 rand="0.6.5"
+byteorder="1.3.1"
 
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "/Users/watsonladd/cf-repos/nts/vendor"

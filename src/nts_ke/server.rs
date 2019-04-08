@@ -5,7 +5,6 @@ use std::vec::Vec;
 extern crate rustls;
 use crate::nts_ke::server::rustls::Session;
 use rustls::TLSError;
-use tokio_rustls::server::TlsStream;
 
 use tokio_rustls::{
     rustls::{NoClientAuth, ServerConfig},
@@ -21,6 +20,9 @@ use crate::config::parse_nts_ke_config;
 use crate::cookie;
 use crate::cookie::NTSKeys;
 
+extern crate byteorder;
+use byteorder::{BigEndian, WriteBytesExt};
+
 struct NtsKeRecord {
     critical: bool,
     record_type: u16,
@@ -35,9 +37,9 @@ fn serialize_record(rec: &mut NtsKeRecord) -> Vec<u8> {
     } else {
         our_type = rec.record_type;
     }
-    out.extend(our_type.to_be_bytes().iter().clone());
+    out.write_u16::<BigEndian>(our_type).unwrap();
     let our_len = rec.contents.len() as u16;
-    out.extend(our_len.to_be_bytes().iter().clone());
+    out.write_u16::<BigEndian>(our_len).unwrap();
     out.append(&mut rec.contents);
     return out;
 }

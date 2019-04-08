@@ -1,0 +1,4 @@
+[build]
+rustflags = ["-Ctarget-feature=+aes,+ssse3"]
+[test]
+rustflags = ["-Ctarget-feature=+aes,+ssse3"]

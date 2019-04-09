@@ -13,6 +13,7 @@ pub struct ConfigNTSKE {
     pub tls_certs: Vec<Certificate>,
     pub tls_keys: Vec<PrivateKey>,
     pub cookie_key: Vec<u8>,
+    pub port: u16,
     pub addr: String,
 }
 
@@ -51,6 +52,7 @@ pub fn parse_nts_ke_config(config_filename: &str) -> ConfigNTSKE {
         tls_keys: load_tls_keys(tls_key_filename),
         cookie_key: load_cookie_key(cookie_key_filename),
         addr: settings.get_str("addr").unwrap(),
+        port: settings.get_int("port").unwrap() as u16,
     };
     config
 }

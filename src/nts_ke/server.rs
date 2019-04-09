@@ -29,6 +29,7 @@ struct NtsKeRecord {
     contents: Vec<u8>,
 }
 
+// Serialize record serializes an NTS KE record to wire format.
 fn serialize_record(rec: &mut NtsKeRecord) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::new();
     let mut our_type = 0;
@@ -44,6 +45,7 @@ fn serialize_record(rec: &mut NtsKeRecord) -> Vec<u8> {
     return out;
 }
 
+// gen_key_from_channel is a wrapper around gen_key.
 fn gen_key_from_channel<T: AsyncRead + AsyncWrite>(
     stream: tokio_rustls::server::TlsStream<T>,
 ) -> (tokio_rustls::server::TlsStream<T>, NTSKeys) {
@@ -52,6 +54,7 @@ fn gen_key_from_channel<T: AsyncRead + AsyncWrite>(
     return (stream, res);
 }
 
+// gen_key computes the client and server keys using exporters.
 fn gen_key(session: &rustls::ServerSession) -> Result<NTSKeys, TLSError> {
     let mut keys: NTSKeys = NTSKeys {
         c2s: [0; 32],
@@ -68,6 +71,8 @@ fn gen_key(session: &rustls::ServerSession) -> Result<NTSKeys, TLSError> {
     Ok(keys)
 }
 
+// response uses the configuration and the keys and computes the response
+// sent to the client.
 fn response(keys: NTSKeys, master_key: Arc<RwLock<Vec<u8>>>) -> Vec<u8> {
     let actual_key = master_key.read().unwrap();
     let cookie = cookie::make_cookie(keys, &actual_key);
@@ -94,6 +99,7 @@ fn response(keys: NTSKeys, master_key: Arc<RwLock<Vec<u8>>>) -> Vec<u8> {
     response
 }
 
+// start_nts_ke_server reads the configuration and starts the server.
 pub fn start_nts_ke_server(config_filename: &str) {
     // First parse config for TLS server using local config module.
     let parsed_config = parse_nts_ke_config(config_filename);

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io;
-use std::io::{BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::net::ToSocketAddrs;
 use std::sync::{Arc, RwLock};
 use std::vec::Vec;
@@ -262,7 +262,7 @@ impl Connection {
         }
     }
 
-    fn incoming_plaintext(&mut self, buf: &[u8]) {
+    fn incoming_plaintext(&mut self, _buf: &[u8]) {
         let keys = gen_key(&self.tls_session).unwrap();
         self.tls_session
             .write_all(&response(keys, &self.master_key, &self.port))

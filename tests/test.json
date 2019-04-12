@@ -1,0 +1,23 @@
+{
+    "CN": "localhost",
+    "hosts": [
+        "server",
+        "localhost",
+        "bogus.com",
+        "*.localhost"
+    ],
+    "key": {
+        "algo": "ecdsa",
+        "size": 256
+    },
+    "names": [
+        {
+            "C": "US",
+            "ST": "CA",
+            "L": "San Francisco",
+            "O": "Cloudflare test",
+            "OU": "Crypto team"
+        }
+    ]
+}
+

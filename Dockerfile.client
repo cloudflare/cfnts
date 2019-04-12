@@ -1,0 +1,5 @@
+FROM rust:1.31
+
+COPY . .
+
+CMD ["./scripts/run_client.sh"]

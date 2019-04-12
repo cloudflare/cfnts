@@ -7,6 +7,7 @@ mod config;
 mod cookie;
 mod ntp;
 mod nts_ke;
+mod rotation;
 
 use clap::App;
 use clap::Arg;
@@ -16,6 +17,7 @@ use log::{debug, error, info, trace, warn};
 use simple_logger;
 
 use crate::ntp::server::start_ntp_server;
+use crate::nts_ke::client::run_nts_client;
 use crate::nts_ke::server::start_nts_ke_server;
 use std::process;
 
@@ -30,6 +32,9 @@ fn app() -> App<'static, 'static> {
                 .arg(Arg::with_name("config_file").index(1).required(true)),
             SubCommand::with_name("ntp")
                 .about("Interfaces with NTP using UDP")
+                .arg(Arg::with_name("config_file").index(1).required(true)),
+            SubCommand::with_name("nts-client")
+                .about("Run a client for testing")
                 .arg(Arg::with_name("config_file").index(1).required(true)),
         ])
 }
@@ -57,6 +62,15 @@ fn main() {
         if let Err(err) = start_ntp_server(config_file) {
             error!("Starting UDP server failed: {}", err);
             process::exit(127);
+        }
+    }
+
+    if let Some(nts_client) = matches.subcommand_matches("nts-client") {
+        let config_file = nts_client.value_of("config_file").unwrap();
+        let res = run_nts_client(config_file.to_string());
+        match res {
+            Err(_) => process::exit(127),
+            Ok(_) => process::exit(0),
         }
     }
 }

@@ -112,6 +112,7 @@ struct NTSKeyServer {
     tls_config: Arc<rustls::ServerConfig>,
     master_key: Vec<u8>,
     port: u16,
+    listen_addr: std::net::SocketAddr,
 }
 
 impl NTSKeyServer {
@@ -120,6 +121,7 @@ impl NTSKeyServer {
         cfg: Arc<rustls::ServerConfig>,
         master_key: Vec<u8>,
         port: u16,
+        listen_addr: std::net::SocketAddr,
     ) -> NTSKeyServer {
         NTSKeyServer {
             server,
@@ -128,10 +130,11 @@ impl NTSKeyServer {
             tls_config: cfg,
             master_key: master_key,
             port: port,
+            listen_addr: listen_addr,
         }
     }
 
-    fn accept(&mut self, poll: &mut mio::Poll) -> bool {
+    fn accept(&mut self, poll: &mut mio::Poll) -> Result<(), std::io::Error> {
         match self.server.accept() {
             Ok((socket, addr)) => {
                 info!("Accepting new connection from {:?}", addr);
@@ -152,14 +155,21 @@ impl NTSKeyServer {
                     Connection::new(socket, token, tls_session, master_key, port),
                 );
                 self.connections[&token].register(poll);
-                true
+                Ok(())
             }
             Err(e) => {
                 if e.kind() != io::ErrorKind::WouldBlock {
                     error!("encountered error while accepting connection; err={:?}", e);
-                    false
+                    self.server = TcpListener::bind(&self.listen_addr)?;
+                    poll.register(
+                        &self.server,
+                        LISTENER,
+                        mio::Ready::readable(),
+                        mio::PollOpt::level(),
+                    )
+                    .map({ |_| () })
                 } else {
-                    true
+                    Ok(())
                 }
             }
         }
@@ -356,7 +366,8 @@ pub fn start_nts_ke_server(config_filename: &str) -> Result<(), Box<std::error::
     )
     .unwrap();
 
-    let mut tlsserv = NTSKeyServer::new(listener, Arc::new(server_config), real_key, real_port);
+    let mut tlsserv =
+        NTSKeyServer::new(listener, Arc::new(server_config), real_key, real_port, addr);
     let mut events = mio::Events::with_capacity(2048);
     info!("Starting NTS-KE server over TCP/TLS on {:?}", addr);
     loop {
@@ -364,19 +375,10 @@ pub fn start_nts_ke_server(config_filename: &str) -> Result<(), Box<std::error::
 
         for event in events.iter() {
             match event.token() {
-                LISTENER => {
-                    if !tlsserv.accept(&mut poll) {
-                        error!("Accept failed");
-                        tlsserv.server = TcpListener::bind(&addr).unwrap();
-                        poll.register(
-                            &tlsserv.server,
-                            LISTENER,
-                            mio::Ready::readable(),
-                            mio::PollOpt::level(),
-                        )
-                        .unwrap();
-                    }
-                }
+                LISTENER => match tlsserv.accept(&mut poll) {
+                    Err(err) => error!("Accept failed unrecoverably"),
+                    Ok(_) => {}
+                },
                 _ => tlsserv.conn_event(&mut poll, &event),
             }
         }

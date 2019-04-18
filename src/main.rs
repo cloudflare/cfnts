@@ -1,5 +1,6 @@
 #[macro_use]
 extern crate futures;
+extern crate log;
 extern crate tokio;
 
 mod config;
@@ -11,8 +12,12 @@ use clap::App;
 use clap::Arg;
 use clap::SubCommand;
 
+use log::{debug, error, info, trace, warn};
+use simple_logger;
+
 use crate::ntp::server::start_ntp_server;
 use crate::nts_ke::server::start_nts_ke_server;
+use std::process;
 
 fn app() -> App<'static, 'static> {
     App::new("cf-nts")
@@ -30,23 +35,28 @@ fn app() -> App<'static, 'static> {
 }
 
 fn main() {
+    simple_logger::init().unwrap();
     let matches = app().get_matches();
 
     // TODO: remove this if statement when .subcommand_required_else_help(true) works.
     if let None = matches.subcommand {
-        println!("You must specify a subcommand, nts-ke or ntp.");
-        return;
+        error!("You must specify a subcommand, nts-ke or ntp.");
+        process::exit(127);
     }
 
     if let Some(nts_ke) = matches.subcommand_matches("nts-ke") {
         let config_file = nts_ke.value_of("config_file").unwrap();
-        start_nts_ke_server(config_file);
+        if let Err(err) = start_nts_ke_server(config_file) {
+            error!("Starting UDP server failed: {}", err);
+            process::exit(127);
+        }
     }
 
     if let Some(ntp) = matches.subcommand_matches("ntp") {
         let config_file = ntp.value_of("config_file").unwrap();
         if let Err(err) = start_ntp_server(config_file) {
-            println!("Starting UDP server failed: {}", err);
+            error!("Starting UDP server failed: {}", err);
+            process::exit(127);
         }
     }
 }

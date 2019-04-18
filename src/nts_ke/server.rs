@@ -1,3 +1,5 @@
+use log::{debug, error, info, trace, warn};
+
 use std::collections::HashMap;
 use std::io;
 use std::io::{Read, Write};
@@ -27,7 +29,7 @@ struct NtsKeRecord {
     contents: Vec<u8>,
 }
 
-// Serialize record serializes an NTS KE record to wire format.
+/// Serialize record serializes an NTS KE record to wire format.
 fn serialize_record(rec: &mut NtsKeRecord) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::new();
     let our_type: u16;
@@ -43,7 +45,7 @@ fn serialize_record(rec: &mut NtsKeRecord) -> Vec<u8> {
     return out;
 }
 
-// gen_key computes the client and server keys using exporters.
+/// gen_key computes the client and server keys using exporters.
 fn gen_key(session: &rustls::ServerSession) -> Result<NTSKeys, TLSError> {
     let mut keys: NTSKeys = NTSKeys {
         c2s: [0; 32],
@@ -60,8 +62,8 @@ fn gen_key(session: &rustls::ServerSession) -> Result<NTSKeys, TLSError> {
     Ok(keys)
 }
 
-// response uses the configuration and the keys and computes the response
-// sent to the client.
+/// response uses the configuration and the keys and computes the response
+/// sent to the client.
 fn response(keys: NTSKeys, master_key: Vec<u8>, port: &u16) -> Vec<u8> {
     let actual_key = master_key;
     let actual_port = port;
@@ -132,7 +134,7 @@ impl NTSKeyServer {
     fn accept(&mut self, poll: &mut mio::Poll) -> bool {
         match self.server.accept() {
             Ok((socket, addr)) => {
-                println!("Accepting new connection from {:?}", addr);
+                info!("Accepting new connection from {:?}", addr);
 
                 let tls_session = rustls::ServerSession::new(&self.tls_config);
                 let master_key = self.master_key.clone();
@@ -141,6 +143,7 @@ impl NTSKeyServer {
                 let token = mio::Token(self.next_id);
                 self.next_id += 1;
                 if self.next_id > 1_000_000_000 {
+                    // We wrap around at 1e9 connections, but avoid the reserved listener token.
                     self.next_id = 2;
                 }
 
@@ -152,8 +155,12 @@ impl NTSKeyServer {
                 true
             }
             Err(e) => {
-                println!("encountered error while accepting connection; err={:?}", e);
-                false
+                if e.kind() != io::ErrorKind::WouldBlock {
+                    error!("encountered error while accepting connection; err={:?}", e);
+                    false
+                } else {
+                    true
+                }
             }
         }
     }
@@ -228,13 +235,13 @@ impl Connection {
                 return;
             }
 
-            println!("read error {:?}", err);
+            info!("read error {:?}", err);
             self.closing = true;
             return;
         }
 
         if rc.unwrap() == 0 {
-            println!("eof");
+            info!("eof");
             self.closing = true;
             return;
         }
@@ -242,7 +249,7 @@ impl Connection {
         // Process newly-received TLS messages.
         let processed = self.tls_session.process_new_packets();
         if processed.is_err() {
-            println!("cannot process packet: {:?}", processed);
+            error!("cannot process packet: {:?}", processed);
             self.closing = true;
             return;
         }
@@ -252,12 +259,12 @@ impl Connection {
         let mut buf = Vec::new();
         let rc = self.tls_session.read_to_end(&mut buf);
         if rc.is_err() {
-            println!("read failed: {:?}", rc);
+            error!("read failed: {:?}", rc);
             self.closing = true;
             return;
         }
         if !buf.is_empty() {
-            println!("plaintxt read {:?},", buf.len());
+            info!("plaintxt read {:?},", buf.len());
             self.incoming_plaintext(&buf);
         }
     }
@@ -276,7 +283,7 @@ impl Connection {
     fn do_tls_write_and_handle_error(&mut self) {
         let rc = self.tls_write();
         if rc.is_err() {
-            println!("write failed {:?}", rc);
+            error!("write failed {:?}", rc);
             self.closing = true;
             return;
         }
@@ -321,7 +328,7 @@ impl Connection {
 }
 
 // start_nts_ke_server reads the configuration and starts the server.
-pub fn start_nts_ke_server(config_filename: &str) {
+pub fn start_nts_ke_server(config_filename: &str) -> Result<(), Box<std::error::Error>> {
     // First parse config for TLS server using local config module.
     let parsed_config = parse_nts_ke_config(config_filename);
     let master_key = parsed_config.cookie_key;
@@ -329,9 +336,7 @@ pub fn start_nts_ke_server(config_filename: &str) {
     let real_key = master_key;
     let real_port = port;
     let mut server_config = ServerConfig::new(NoClientAuth::new());
-    server_config
-        .set_single_cert(parsed_config.tls_certs, parsed_config.tls_keys[0].clone())
-        .expect("invalid key or certificate");
+    server_config.set_single_cert(parsed_config.tls_certs, parsed_config.tls_keys[0].clone())?;
 
     let addr = parsed_config
         .addr
@@ -353,7 +358,7 @@ pub fn start_nts_ke_server(config_filename: &str) {
 
     let mut tlsserv = NTSKeyServer::new(listener, Arc::new(server_config), real_key, real_port);
     let mut events = mio::Events::with_capacity(2048);
-    println!("Starting NTS-KE server over TCP/TLS on {:?}", addr);
+    info!("Starting NTS-KE server over TCP/TLS on {:?}", addr);
     loop {
         poll.poll(&mut events, None).unwrap();
 
@@ -361,7 +366,15 @@ pub fn start_nts_ke_server(config_filename: &str) {
             match event.token() {
                 LISTENER => {
                     if !tlsserv.accept(&mut poll) {
-                        break;
+                        error!("Accept failed");
+                        tlsserv.server = TcpListener::bind(&addr).unwrap();
+                        poll.register(
+                            &tlsserv.server,
+                            LISTENER,
+                            mio::Ready::readable(),
+                            mio::PollOpt::level(),
+                        )
+                        .unwrap();
                     }
                 }
                 _ => tlsserv.conn_event(&mut poll, &event),

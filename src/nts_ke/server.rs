@@ -62,9 +62,9 @@ fn gen_key(session: &rustls::ServerSession) -> Result<NTSKeys, TLSError> {
 
 // response uses the configuration and the keys and computes the response
 // sent to the client.
-fn response(keys: NTSKeys, master_key: &Arc<RwLock<Vec<u8>>>, port: &Arc<RwLock<u16>>) -> Vec<u8> {
-    let actual_key = master_key.read().unwrap();
-    let actual_port = port.read().unwrap();
+fn response(keys: NTSKeys, master_key: Vec<u8>, port: &u16) -> Vec<u8> {
+    let actual_key = master_key;
+    let actual_port = port;
     let mut response: Vec<u8> = Vec::new();
     let mut aead_rec = NtsKeRecord {
         critical: false,
@@ -108,16 +108,16 @@ struct NTSKeyServer {
     connections: HashMap<mio::Token, Connection>,
     next_id: usize,
     tls_config: Arc<rustls::ServerConfig>,
-    master_key: Arc<RwLock<Vec<u8>>>,
-    port: Arc<RwLock<u16>>,
+    master_key: Vec<u8>,
+    port: u16,
 }
 
 impl NTSKeyServer {
     fn new(
         server: TcpListener,
         cfg: Arc<rustls::ServerConfig>,
-        master_key: Arc<RwLock<Vec<u8>>>,
-        port: Arc<RwLock<u16>>,
+        master_key: Vec<u8>,
+        port: u16,
     ) -> NTSKeyServer {
         NTSKeyServer {
             server,
@@ -136,7 +136,7 @@ impl NTSKeyServer {
 
                 let tls_session = rustls::ServerSession::new(&self.tls_config);
                 let master_key = self.master_key.clone();
-                let port = self.port.clone();
+                let port = self.port;
 
                 let token = mio::Token(self.next_id);
                 self.next_id += 1;
@@ -177,8 +177,8 @@ struct Connection {
     closing: bool,
     closed: bool,
     tls_session: rustls::ServerSession,
-    master_key: Arc<RwLock<Vec<u8>>>,
-    port: Arc<RwLock<u16>>,
+    master_key: Vec<u8>,
+    port: u16,
 }
 
 impl Connection {
@@ -186,8 +186,8 @@ impl Connection {
         socket: TcpStream,
         token: mio::Token,
         tls_session: rustls::ServerSession,
-        master_key: Arc<RwLock<Vec<u8>>>,
-        port: Arc<RwLock<u16>>,
+        master_key: Vec<u8>,
+        port: u16,
     ) -> Connection {
         Connection {
             socket,
@@ -265,7 +265,7 @@ impl Connection {
     fn incoming_plaintext(&mut self, _buf: &[u8]) {
         let keys = gen_key(&self.tls_session).unwrap();
         self.tls_session
-            .write_all(&response(keys, &self.master_key, &self.port))
+            .write_all(&response(keys, self.master_key.clone(), &self.port))
             .unwrap();
     }
 
@@ -326,8 +326,8 @@ pub fn start_nts_ke_server(config_filename: &str) {
     let parsed_config = parse_nts_ke_config(config_filename);
     let master_key = parsed_config.cookie_key;
     let port = parsed_config.port;
-    let real_key = Arc::new(RwLock::new(master_key));
-    let real_port = Arc::new(RwLock::new(port));
+    let real_key = master_key;
+    let real_port = port;
     let mut server_config = ServerConfig::new(NoClientAuth::new());
     server_config
         .set_single_cert(parsed_config.tls_certs, parsed_config.tls_keys[0].clone())

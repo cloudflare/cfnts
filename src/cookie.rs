@@ -2,6 +2,7 @@ use miscreant::aead;
 use miscreant::aead::Aead;
 use rand::Rng;
 
+pub const COOKIE_SIZE: usize = 120;
 #[derive(Debug, Copy, Clone)]
 pub struct NTSKeys {
     pub c2s: [u8; 32],
@@ -87,6 +88,7 @@ mod tests {
         let mut cookie = make_cookie(test, &master_key, &key_id);
         let ret = get_keyid(&cookie);
 
+        assert_eq!(cookie.len(), COOKIE_SIZE);
         match ret {
             None => assert!(false),
             Some(id) => assert_eq!(id, key_id),

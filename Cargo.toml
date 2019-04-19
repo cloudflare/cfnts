@@ -19,8 +19,6 @@ prometheus = "0.5"
 rand = "0.6.5"
 ring = "0.14.6"
 rustls = "0.15.1"
-tokio = "0.1.15"
-tokio-rustls = "0.10.0-alpha"
 webpki = "0.19.1"
 webpki-roots="0.16.0"
 

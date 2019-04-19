@@ -1,7 +1,6 @@
 #[macro_use]
 extern crate futures;
 extern crate log;
-extern crate tokio;
 
 mod config;
 mod cookie;
@@ -16,9 +15,11 @@ use clap::SubCommand;
 use log::{debug, error, info, trace, warn};
 use simple_logger;
 
+use crate::ntp::client::run_nts_ntp_client;
 use crate::ntp::server::start_ntp_server;
-use crate::nts_ke::client::run_nts_client;
+use crate::nts_ke::client::run_nts_ke_client;
 use crate::nts_ke::server::start_nts_ke_server;
+
 use std::process;
 
 fn app() -> App<'static, 'static> {
@@ -67,10 +68,23 @@ fn main() {
 
     if let Some(nts_client) = matches.subcommand_matches("nts-client") {
         let config_file = nts_client.value_of("config_file").unwrap();
-        let res = run_nts_client(config_file.to_string());
+        let res = run_nts_ke_client(config_file.to_string());
         match res {
             Err(_) => process::exit(127),
-            Ok(_) => process::exit(0),
+            Ok(_) => {}
+        }
+        let state = res.unwrap();
+        debug!("running next step with state {:?}", state);
+        let res = run_nts_ntp_client(state);
+        match res {
+            Err(err) => {
+                println!("{:?}", err);
+                process::exit(127)
+            }
+            Ok(_) => {
+                println!("Succesful transaction");
+                process::exit(0)
+            }
         }
     }
 }

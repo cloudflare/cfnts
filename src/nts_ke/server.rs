@@ -2,6 +2,7 @@ use log::{debug, error, info, trace, warn};
 
 use std::collections::HashMap;
 use std::io;
+use std::io::Cursor;
 use std::io::{Read, Write};
 use std::net::ToSocketAddrs;
 use std::sync::{Arc, RwLock};

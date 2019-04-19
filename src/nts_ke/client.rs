@@ -31,8 +31,18 @@ struct ClientState {
     next_protocols: Vec<u16>,
     aead_scheme: u16,
     next_port: u16,
-    next_server: Option<String>,
+    next_server: String,
     keys: NTSKeys,
+}
+
+#[derive(Clone, Debug)]
+pub struct NtsKeResult {
+    pub cookies: Vec<Cookie>,
+    pub next_protocols: Vec<u16>,
+    pub aead_scheme: u16,
+    pub next_server: String,
+    pub next_port: u16,
+    pub keys: NTSKeys,
 }
 
 #[derive(Debug, Clone)]
@@ -87,7 +97,7 @@ fn process_record(
 }
 
 /// run_nts_client executes the nts client with the config in config file
-pub fn run_nts_client(config_file: String) -> Result<(), Box<dyn Error>> {
+pub fn run_nts_ke_client(config_file: String) -> Result<NtsKeResult, Box<dyn Error>> {
     let parsed_config = config::parse_nts_client_config(&config_file);
     let mut tls_config = rustls::ClientConfig::new();
     let alpn_proto = String::from("ntske/1");
@@ -134,14 +144,14 @@ pub fn run_nts_client(config_file: String) -> Result<(), Box<dyn Error>> {
     tls_stream.write(&protocol::serialize_record(&mut end_rec))?;
     tls_stream.flush()?;
     info!("Request transmitted");
-    let res = tls_stream.read_to_end(&mut buf);
+    let res = tls_stream.read_to_end(&mut buf); // They might not close it!
     let keys = protocol::gen_key(&client).unwrap();
 
     let mut state = ClientState {
         finished: false,
         cookies: Vec::new(),
         next_protocols: Vec::new(),
-        next_server: None,
+        next_server: parsed_config.host.clone(),
         next_port: DEFAULT_PORT,
         keys: keys,
         aead_scheme: DEFAULT_SCHEME,
@@ -172,5 +182,12 @@ pub fn run_nts_client(config_file: String) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    Ok(())
+    Ok(NtsKeResult {
+        aead_scheme: state.aead_scheme,
+        cookies: state.cookies,
+        next_protocols: state.next_protocols,
+        next_server: state.next_server,
+        next_port: state.next_port,
+        keys: state.keys,
+    })
 }

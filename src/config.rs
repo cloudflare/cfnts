@@ -3,7 +3,7 @@ use std::io::BufReader;
 
 use config::Config;
 
-use tokio_rustls::rustls::{
+use rustls::{
     internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys},
     Certificate, PrivateKey,
 };
@@ -63,7 +63,7 @@ pub fn parse_nts_ke_config(config_filename: &str) -> ConfigNTSKE {
         cookie_key: load_cookie_key(cookie_key_filename),
         memcached_url: settings.get_str("memc_url").unwrap_or("".to_string()),
         addr: settings.get_str("addr").unwrap(),
-        next_port: settings.get_int("port").unwrap() as u16,
+        next_port: settings.get_int("next_port").unwrap() as u16,
     };
     config
 }

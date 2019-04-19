@@ -1,4 +1,5 @@
-use log::{debug, error};
+use log::{debug, error, info, trace, warn};
+
 use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, RwLock};
@@ -9,7 +10,6 @@ use std::time::SystemTime;
 use memcache;
 use memcache::MemcacheError;
 
-extern crate ring;
 use ring::digest;
 use ring::hmac;
 
@@ -26,7 +26,7 @@ pub struct RotatingKeys {
     pub keys: HashMap<KeyID, Vec<u8>>,
 }
 
-// This function writes a i64 as 8 bytes in big endian.
+/// This function writes a i64 as 8 bytes in big endian.
 fn be_bytes(n: i64) -> [u8; 8] {
     let mut ret: [u8; 8] = [0; 8];
     let mut u = n as u64;

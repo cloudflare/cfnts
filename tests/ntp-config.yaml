@@ -1,3 +1,6 @@
 addr: server:123
 cookie_key_file: tests/cookie.key # TODO: store and read as pem files, or read bytes directly from file?
 memc_url: memcache://memcache:11211
+metrics_addr: server
+metrics_port: 8000
+

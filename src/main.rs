@@ -1,9 +1,12 @@
 #[macro_use]
 extern crate futures;
+extern crate lazy_static;
 extern crate log;
+extern crate prometheus;
 
 mod config;
 mod cookie;
+mod metrics;
 mod ntp;
 mod nts_ke;
 mod rotation;

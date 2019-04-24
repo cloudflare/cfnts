@@ -1,11 +1,14 @@
+use lazy_static::lazy_static;
 use log::{debug, error, info, trace, warn};
+use prometheus::{opts, register_counter, register_int_counter, IntCounter, Opts};
 
+use crate::metrics;
 use std::collections::HashMap;
 use std::io;
-use std::io::Cursor;
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 use std::net::ToSocketAddrs;
 use std::sync::{Arc, RwLock};
+use std::thread;
 use std::time;
 use std::vec::Vec;
 
@@ -23,7 +26,6 @@ use crate::cookie::NTSKeys;
 use crate::rotation;
 use crate::rotation::RotatingKeys;
 
-extern crate byteorder;
 use byteorder::{BigEndian, WriteBytesExt};
 
 const LISTENER: mio::Token = mio::Token(0);
@@ -32,6 +34,13 @@ use super::protocol::gen_key;
 use super::protocol::serialize_record;
 use super::protocol::{NtsKeRecord, NtsKeType};
 
+// TODO: add timeouts, explicitly
+lazy_static! {
+    static ref QUERY_COUNTER: IntCounter =
+        register_int_counter!("nts_queries_total", "Number of NTS requests").unwrap();
+    static ref ERROR_COUNTER: IntCounter =
+        register_int_counter!("nts_errors_total", "Number of errors").unwrap();
+}
 // response uses the configuration and the keys and computes the response
 // sent to the client.
 fn response(keys: NTSKeys, master_key: &Arc<RwLock<RotatingKeys>>, port: &u16) -> Vec<u8> {
@@ -134,6 +143,7 @@ impl NTSKeyServer {
             Err(e) => {
                 if e.kind() != io::ErrorKind::WouldBlock {
                     error!("encountered error while accepting connection; err={:?}", e);
+                    ERROR_COUNTER.inc();
                     self.server = TcpListener::bind(&self.listen_addr)?;
                     poll.register(
                         &self.server,
@@ -142,6 +152,7 @@ impl NTSKeyServer {
                         mio::PollOpt::level(),
                     )
                     .map({ |_| () })
+
                 } else {
                     Ok(())
                 }
@@ -220,6 +231,7 @@ impl Connection {
             }
 
             info!("read error {:?}", err);
+            ERROR_COUNTER.inc();
             self.closing = true;
             return;
         }
@@ -233,6 +245,7 @@ impl Connection {
         // Process newly-received TLS messages.
         let processed = self.tls_session.process_new_packets();
         if processed.is_err() {
+            ERROR_COUNTER.inc();
             error!("cannot process packet: {:?}", processed);
             self.closing = true;
             return;
@@ -243,6 +256,7 @@ impl Connection {
         let mut buf = Vec::new();
         let rc = self.tls_session.read_to_end(&mut buf);
         if rc.is_err() {
+            ERROR_COUNTER.inc();
             error!("read failed: {:?}", rc);
             self.closing = true;
             return;
@@ -254,6 +268,7 @@ impl Connection {
     }
 
     fn incoming_plaintext(&mut self, _buf: &[u8]) {
+        QUERY_COUNTER.inc();
         let keys = gen_key(&self.tls_session).unwrap();
 
         if !self.closing {
@@ -338,12 +353,18 @@ pub fn start_nts_ke_server(config_filename: &str) -> Result<(), Box<std::error::
         match res {
             Err(e) => {
                 error!("Failure to initialize key rotation: {:?}", e);
+                ERROR_COUNTER.inc();
                 std::thread::sleep(time::Duration::from_secs(10));
             }
             Ok(()) => break,
         }
     }
     let keys = Arc::new(RwLock::new(key_rot));
+    let metrics = parsed_config.metrics.clone();
+    info!("Starting metrics server");
+    thread::spawn(move || {
+        metrics::run_metrics(metrics);
+    });
     rotation::periodic_rotate(keys.clone());
     let mut server_config = ServerConfig::new(NoClientAuth::new());
     let alpn_proto = String::from("ntske/1");
@@ -379,7 +400,7 @@ pub fn start_nts_ke_server(config_filename: &str) -> Result<(), Box<std::error::
         for event in events.iter() {
             match event.token() {
                 LISTENER => match tlsserv.accept(&mut poll) {
-                    Err(err) => error!("Accept failed unrecoverably"),
+                    Err(err) => {error!("Accept failed unrecoverably"), ERR_COUNTER.inc();},
                     Ok(_) => {}
                 },
                 _ => tlsserv.conn_event(&mut poll, &event),

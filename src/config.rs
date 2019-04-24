@@ -8,6 +8,12 @@ use rustls::{
     Certificate, PrivateKey,
 };
 
+#[derive(Clone, Debug)]
+pub struct MetricsConfig {
+    pub port: u16,
+    pub addr: String,
+}
+
 #[derive(Debug)]
 pub struct ConfigNTSKE {
     pub tls_certs: Vec<Certificate>,
@@ -16,6 +22,7 @@ pub struct ConfigNTSKE {
     pub addr: String,
     pub next_port: u16,
     pub memcached_url: String,
+    pub metrics: MetricsConfig,
 }
 
 #[derive(Debug)]
@@ -23,6 +30,7 @@ pub struct ConfigNTP {
     pub addr: String,
     pub cookie_key: Vec<u8>,
     pub memcached_url: String,
+    pub metrics: MetricsConfig,
 }
 
 #[derive(Debug)]
@@ -64,6 +72,10 @@ pub fn parse_nts_ke_config(config_filename: &str) -> ConfigNTSKE {
         memcached_url: settings.get_str("memc_url").unwrap_or("".to_string()),
         addr: settings.get_str("addr").unwrap(),
         next_port: settings.get_int("next_port").unwrap() as u16,
+        metrics: MetricsConfig {
+            port: settings.get_int("metrics_port").unwrap() as u16,
+            addr: settings.get_str("metrics_addr").unwrap(),
+        },
     };
     config
 }
@@ -83,6 +95,10 @@ pub fn parse_ntp_config(config_filename: &str) -> ConfigNTP {
         cookie_key: load_cookie_key(cookie_key_filename),
         addr: settings.get_str("addr").unwrap(),
         memcached_url: settings.get_str("memc_url").unwrap_or("".to_string()),
+        metrics: MetricsConfig {
+            port: settings.get_int("metrics_port").unwrap() as u16,
+            addr: settings.get_str("metrics_addr").unwrap(),
+        },
     };
     println!("PARSED CONFIG");
     config

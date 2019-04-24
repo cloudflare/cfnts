@@ -1,5 +1,5 @@
-FROM rust:1.31
-
+FROM docker.cfops.it/debian/stretch:2018.3.0
 COPY . .
 
+RUN apt-get update && apt-get install -y prometheus
 CMD ["./scripts/run_client.sh"]

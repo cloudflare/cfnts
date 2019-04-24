@@ -1,13 +1,15 @@
-extern crate byteorder;
 use crate::config::parse_ntp_config;
-use crate::cookie::NTSKeys;
-use crate::cookie::{eat_cookie, get_keyid, make_cookie, COOKIE_SIZE};
+
+use crate::cookie::{eat_cookie, get_keyid, make_cookie, NTSKeys, COOKIE_SIZE};
 use crate::metrics;
 use crate::rotation;
 use crate::rotation::RotatingKeys;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use lazy_static::lazy_static;
 use log::{debug, error, info, trace, warn};
+use prometheus::{opts, register_counter, register_int_counter, IntCounter, Opts};
+
 use std::collections::HashMap;
 use std::io;
 use std::io::Cursor;
@@ -18,6 +20,7 @@ use std::net::ToSocketAddrs;
 use std::net::UdpSocket;
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::thread;
 use std::time;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -35,7 +38,20 @@ use super::protocol::{
 };
 
 const BUF_SIZE: usize = 1280; // Anything larger might fragment.
-#[derive(Debug, Clone, Copy)]
+
+lazy_static! {
+    static ref QUERY_COUNTER: IntCounter =
+        register_int_counter!("ntp_queries_total", "Number of NTP queries").unwrap();
+    static ref NTS_COUNTER: IntCounter = register_int_counter!(
+        "ntp_nts_queries_total",
+        "Number of queries we thought were NTS"
+    )
+    .unwrap();
+    static ref KOD_COUNTER: IntCounter =
+        register_int_counter!("ntp_kod_total", "Number of Kiss of Death packets sent").unwrap();
+}
+
+#[derive(Clone, Copy, Debug)]
 struct ServerState {
     leap: LeapState,
     stratum: u8,
@@ -49,7 +65,7 @@ struct ServerState {
 }
 
 /// start_ntp_server uns the ntp server with the config in filename
-pub fn start_ntp_server(config_filename: &str) -> Result<(), Box<std::error::Error>> {
+pub fn start_ntp_server(config_filename: &str) -> Result<(), Box<dyn std::error::Error>> {
     // First parse config for TLS server using local config module.
     let parsed_config = parse_ntp_config(config_filename);
 
@@ -63,7 +79,7 @@ pub fn start_ntp_server(config_filename: &str) -> Result<(), Box<std::error::Err
         latest: [0; 8],
         keys: HashMap::new(),
     };
-    println!("Initializing keys with memcached");
+    info!("Initializing keys with memcached");
     loop {
         let res = key_rot.rotate_keys();
         match res {
@@ -97,8 +113,12 @@ pub fn start_ntp_server(config_filename: &str) -> Result<(), Box<std::error::Err
     };
 
     let socket = UdpSocket::bind(&addr)?;
-
-    println!("Listening on: {}", socket.local_addr()?); // TODO: set up the option for kernel timestamping
+    info!("spawning metrics");
+    let metrics = parsed_config.metrics.clone();
+    thread::spawn(move || {
+        metrics::run_metrics(metrics);
+    });
+    info!("Listening on: {}", socket.local_addr()?); // TODO: set up the option for kernel timestamping
     loop {
         let mut buf = [0; BUF_SIZE];
 
@@ -145,11 +165,13 @@ fn response(
         receive_timestamp: response_timestamp,
         transmit_timestamp: response_timestamp,
     };
+    QUERY_COUNTER.inc();
 
     if query_packet.header.mode != PacketMode::Client {
         return send_kiss_of_death(query_packet);
     }
     if is_nts_packet(&query_packet) {
+        NTS_COUNTER.inc();
         let cookie = extract_extension(&query_packet, NTSCookie).unwrap();
         let keyid_maybe = get_keyid(&cookie.contents);
         match keyid_maybe {
@@ -243,6 +265,7 @@ fn send_kiss_of_death(query_packet: NtpPacket) -> Result<Vec<u8>, std::io::Error
 /// The kiss of death tells the client it has done something wrong.
 /// draft-ietf-ntp-using-nts-for-ntp-18 and RFC 5905 specify the format.
 fn kiss_of_death(query_packet: NtpPacket) -> NtpPacket {
+    KOD_COUNTER.inc();
     let kod_header = NtpPacketHeader {
         leap_indicator: LeapState::Unknown,
         version: 4,

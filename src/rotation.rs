@@ -10,9 +10,21 @@ use std::time::SystemTime;
 use memcache;
 use memcache::MemcacheError;
 
+use lazy_static::lazy_static;
+use prometheus::{opts, register_counter, register_int_counter, IntCounter, Opts};
+
 use ring::digest;
 use ring::hmac;
 
+lazy_static! {
+    static ref ROTATION_COUNTER: IntCounter =
+        register_int_counter!("ntp_key_rotations_total", "Number of key rotations").unwrap();
+    static ref FAILURE_COUNTER: IntCounter = register_int_counter!(
+        "ntp_key_rotations_failed_total",
+        "Number of failures in key rotation"
+    )
+    .unwrap();
+}
 pub type KeyID = [u8; 8];
 
 pub struct RotatingKeys {
@@ -53,6 +65,7 @@ impl VecMap for MemcacheVecMap {
 
 impl RotatingKeys {
     pub fn rotate_keys(&mut self) -> Result<(), Box<std::error::Error>> {
+        ROTATION_COUNTER.inc();
         let mut client = memcache::Client::connect(self.memcache_url.clone())?;
         let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
         let timestamp = now.as_secs() as i64;
@@ -78,6 +91,7 @@ impl RotatingKeys {
                 }
                 None => {
                     error!("lost entry: {:?}", db_loc);
+                    FAILURE_COUNTER.inc();
                     failed = true;
                 }
             }

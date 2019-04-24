@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
-use log::{debug, error, info, trace, warn};
 use prometheus::{opts, register_counter, register_int_counter, IntCounter, Opts};
+use slog::{debug, error, info, trace, warn};
 
 use crate::metrics;
 use std::collections::HashMap;
@@ -97,6 +97,7 @@ struct NTSKeyServer {
     master_key: Arc<RwLock<RotatingKeys>>,
     next_port: u16,
     listen_addr: std::net::SocketAddr,
+    logger: slog::Logger,
 }
 
 impl NTSKeyServer {
@@ -106,6 +107,7 @@ impl NTSKeyServer {
         master_key: Arc<RwLock<RotatingKeys>>,
         next_port: u16,
         listen_addr: std::net::SocketAddr,
+        logger: slog::Logger,
     ) -> NTSKeyServer {
         NTSKeyServer {
             server,
@@ -115,13 +117,14 @@ impl NTSKeyServer {
             master_key: master_key,
             next_port: next_port,
             listen_addr: listen_addr,
+            logger: logger,
         }
     }
 
     fn accept(&mut self, poll: &mut mio::Poll) -> Result<(), std::io::Error> {
         match self.server.accept() {
             Ok((socket, addr)) => {
-                info!("Accepting new connection from {:?}", addr);
+                info!(self.logger, "Accepting new connection from {:?}", addr);
 
                 let tls_session = rustls::ServerSession::new(&self.tls_config);
                 let master_key = self.master_key.clone();
@@ -133,17 +136,28 @@ impl NTSKeyServer {
                     self.next_id = 2;
                 }
 
+                let next_logger = self.logger.new(slog::o!("client"=> addr));
                 self.connections.insert(
                     token,
-                    Connection::new(socket, token, tls_session, master_key, self.next_port),
+                    Connection::new(
+                        socket,
+                        token,
+                        tls_session,
+                        master_key,
+                        self.next_port,
+                        next_logger,
+                    ),
                 );
                 self.connections[&token].register(poll);
                 Ok(())
             }
             Err(e) => {
                 if e.kind() != io::ErrorKind::WouldBlock {
-                    error!("encountered error while accepting connection; err={:?}", e);
                     ERROR_COUNTER.inc();
+                    error!(
+                        self.logger,
+                        "encountered error while accepting connection; err={:?}", e
+                    );
                     self.server = TcpListener::bind(&self.listen_addr)?;
                     poll.register(
                         &self.server,
@@ -152,7 +166,6 @@ impl NTSKeyServer {
                         mio::PollOpt::level(),
                     )
                     .map({ |_| () })
-
                 } else {
                     Ok(())
                 }
@@ -178,9 +191,11 @@ struct Connection {
     token: mio::Token,
     closing: bool,
     closed: bool,
+    sent_response: bool,
     tls_session: rustls::ServerSession,
     master_key: Arc<RwLock<RotatingKeys>>,
     next_port: u16,
+    logger: slog::Logger,
 }
 
 impl Connection {
@@ -190,15 +205,18 @@ impl Connection {
         tls_session: rustls::ServerSession,
         master_key: Arc<RwLock<RotatingKeys>>,
         port: u16,
+        logger: slog::Logger,
     ) -> Connection {
         Connection {
             socket,
             token,
             closing: false,
             closed: false,
+            sent_response: false,
             tls_session,
             master_key: master_key.clone(),
             next_port: port,
+            logger: logger,
         }
     }
 
@@ -230,14 +248,17 @@ impl Connection {
                 return;
             }
 
-            info!("read error {:?}", err);
             ERROR_COUNTER.inc();
+            info!(self.logger, "read error {:?}", err);
             self.closing = true;
             return;
         }
 
         if rc.unwrap() == 0 {
-            info!("eof");
+            if !self.sent_response {
+                ERROR_COUNTER.inc();
+            }
+            info!(self.logger, "eof");
             self.closing = true;
             return;
         }
@@ -246,7 +267,7 @@ impl Connection {
         let processed = self.tls_session.process_new_packets();
         if processed.is_err() {
             ERROR_COUNTER.inc();
-            error!("cannot process packet: {:?}", processed);
+            error!(self.logger, "cannot process packet: {:?}", processed);
             self.closing = true;
             return;
         }
@@ -257,12 +278,12 @@ impl Connection {
         let rc = self.tls_session.read_to_end(&mut buf);
         if rc.is_err() {
             ERROR_COUNTER.inc();
-            error!("read failed: {:?}", rc);
+            error!(self.logger, "read failed: {:?}", rc);
             self.closing = true;
             return;
         }
         if !buf.is_empty() {
-            info!("plaintxt read {:?},", buf.len());
+            debug!(self.logger, "plaintxt read {:?},", buf.len());
             self.incoming_plaintext(&buf);
         }
     }
@@ -272,6 +293,7 @@ impl Connection {
         let keys = gen_key(&self.tls_session).unwrap();
 
         if !self.closing {
+            self.sent_response = true;
             self.tls_session
                 .write_all(&response(keys, &self.master_key, &self.next_port))
                 .unwrap();
@@ -287,7 +309,7 @@ impl Connection {
     fn do_tls_write_and_handle_error(&mut self) {
         let rc = self.tls_write();
         if rc.is_err() {
-            error!("write failed {:?}", rc);
+            error!(self.logger, "write failed {:?}", rc);
             self.closing = true;
             return;
         }
@@ -332,7 +354,11 @@ impl Connection {
 }
 
 // start_nts_ke_server reads the configuration and starts the server.
-pub fn start_nts_ke_server(config_filename: &str) -> Result<(), Box<std::error::Error>> {
+pub fn start_nts_ke_server(
+    start_logger: &slog::Logger,
+    config_filename: &str,
+) -> Result<(), Box<std::error::Error>> {
+    let logger = start_logger.new(slog::o!("component"=>"nts_ke"));
     // First parse config for TLS server using local config module.
     // Figure out how to not rotate keys for now. Also we should set up a client.
     let parsed_config = parse_nts_ke_config(config_filename);
@@ -346,13 +372,14 @@ pub fn start_nts_ke_server(config_filename: &str) -> Result<(), Box<std::error::
         master_key: parsed_config.cookie_key,
         latest: [0; 8],
         keys: HashMap::new(),
+        logger: logger.clone(),
     };
-    info!("Initializing keys with memcached");
+    info!(logger, "Initializing keys with memcached");
     loop {
         let res = key_rot.rotate_keys();
         match res {
             Err(e) => {
-                error!("Failure to initialize key rotation: {:?}", e);
+                error!(logger, "Failure to initialize key rotation: {:?}", e);
                 ERROR_COUNTER.inc();
                 std::thread::sleep(time::Duration::from_secs(10));
             }
@@ -361,7 +388,7 @@ pub fn start_nts_ke_server(config_filename: &str) -> Result<(), Box<std::error::
     }
     let keys = Arc::new(RwLock::new(key_rot));
     let metrics = parsed_config.metrics.clone();
-    info!("Starting metrics server");
+    info!(logger, "Starting metrics server");
     thread::spawn(move || {
         metrics::run_metrics(metrics);
     });
@@ -391,16 +418,20 @@ pub fn start_nts_ke_server(config_filename: &str) -> Result<(), Box<std::error::
         mio::PollOpt::level(),
     )
     .unwrap();
-    let mut tlsserv = NTSKeyServer::new(listener, conf, keys.clone(), port, addr);
+    let mut tlsserv = NTSKeyServer::new(listener, conf, keys.clone(), port, addr, logger.clone());
     let mut events = mio::Events::with_capacity(2048);
-    info!("Starting NTS-KE server over TCP/TLS on {:?}", addr);
+    info!(logger, "Starting NTS-KE server over TCP/TLS on {:?}", addr);
     loop {
         poll.poll(&mut events, None).unwrap();
 
         for event in events.iter() {
             match event.token() {
                 LISTENER => match tlsserv.accept(&mut poll) {
-                    Err(err) => {error!("Accept failed unrecoverably"), ERR_COUNTER.inc();},
+                    Err(err) => {
+                        ERROR_COUNTER.inc();
+                        error!(logger, "Accept failed unrecoverably");
+                    }
+
                     Ok(_) => {}
                 },
                 _ => tlsserv.conn_event(&mut poll, &event),

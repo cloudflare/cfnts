@@ -1,0 +1,6 @@
+type = "terminal" # terminal or file
+format = "full" # full or compact
+source_location = "module_and_line" # none or module_and_line
+timezone = "utc" # utc or local
+level = "debug" # one of trace, debug, info, warning, error, critical
+destination = "stderr" # stderr or stdout

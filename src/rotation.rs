@@ -1,5 +1,3 @@
-use log::{debug, error, info, trace, warn};
-
 use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, RwLock};
@@ -12,6 +10,7 @@ use memcache::MemcacheError;
 
 use lazy_static::lazy_static;
 use prometheus::{opts, register_counter, register_int_counter, IntCounter, Opts};
+use slog::{debug, error, info, trace, warn};
 
 use ring::digest;
 use ring::hmac;
@@ -36,6 +35,7 @@ pub struct RotatingKeys {
     pub master_key: Vec<u8>,
     pub latest: KeyID,
     pub keys: HashMap<KeyID, Vec<u8>>,
+    pub logger: slog::Logger,
 }
 
 /// This function writes a i64 as 8 bytes in big endian.
@@ -82,7 +82,6 @@ impl RotatingKeys {
         for i in -self.backward_periods..(self.forward_periods + 1) {
             let epoch = self.epoch(timestamp, i);
             let db_loc = format!("{}/{}", self.prefix, epoch);
-            debug!("reading: {:?}", db_loc);
             let db_val = client.get(&db_loc)?;
             let key_id = be_bytes(epoch);
             match db_val {
@@ -90,8 +89,8 @@ impl RotatingKeys {
                     self.keys.insert(key_id, self.compute_wrap(s));
                 }
                 None => {
-                    error!("lost entry: {:?}", db_loc);
                     FAILURE_COUNTER.inc();
+                    error!(self.logger, "cannot read from memcache"; "key"=>db_loc, "memcache_url"=>self.memcache_url.clone());
                     failed = true;
                 }
             }
@@ -156,6 +155,8 @@ mod test {
 
     #[test]
     fn test_rotation() {
+        use sloggers::null::NullLoggerBuilder;
+        use sloggers::Build;
         let mut testmap = HashMapVecMap {
             table: HashMap::new(),
         };
@@ -183,6 +184,7 @@ mod test {
             master_key: vec![0, 32],
             latest: [1, 2, 3, 4, 5, 6, 7, 8],
             keys: HashMap::new(),
+            logger: NullLoggerBuilder.build().unwrap(),
         };
         test_rotor.internal_rotate(&mut testmap, 2).unwrap();
         let old_latest = test_rotor.latest;

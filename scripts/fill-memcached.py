@@ -12,8 +12,4 @@ now = int(math.floor(time.time()))
 for i in range(-50, 4):
     epoch = int((math.floor(now/interval)+i)*interval)
     key = "/nts/nts-keys/%s"%epoch
-    print key
-    if mc.set(key, rand.read(16)) == 0:
-        print "failure"
-    else:
-        print "success"
+    mc.set(key, rand.read(16))

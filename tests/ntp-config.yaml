@@ -3,4 +3,3 @@ cookie_key_file: tests/cookie.key # TODO: store and read as pem files, or read b
 memc_url: memcache://memcache:11211
 metrics_addr: server
 metrics_port: 8000
-

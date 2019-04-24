@@ -1,8 +1,9 @@
 #[macro_use]
-extern crate futures;
 extern crate lazy_static;
 extern crate log;
 extern crate prometheus;
+extern crate slog;
+extern crate sloggers;
 
 mod config;
 mod cookie;
@@ -15,8 +16,11 @@ use clap::App;
 use clap::Arg;
 use clap::SubCommand;
 
-use log::{debug, error, info, trace, warn};
-use simple_logger;
+use slog::{debug, error, info, trace};
+use slog_stdlog;
+use sloggers::terminal::{Destination, TerminalLoggerBuilder};
+use sloggers::types::Severity;
+use sloggers::Build;
 
 use crate::ntp::client::run_nts_ntp_client;
 use crate::ntp::server::start_ntp_server;
@@ -44,48 +48,54 @@ fn app() -> App<'static, 'static> {
 }
 
 fn main() {
-    simple_logger::init().unwrap();
+    let mut builder = TerminalLoggerBuilder::new();
+    builder.level(Severity::Debug);
+    builder.destination(Destination::Stderr);
+
+    let logger = builder.build().unwrap();
+    slog_stdlog::init();
+    let _guard = slog_scope::set_global_logger(logger.clone());
     let matches = app().get_matches();
 
     // TODO: remove this if statement when .subcommand_required_else_help(true) works.
     if let None = matches.subcommand {
-        error!("You must specify a subcommand, nts-ke or ntp.");
+        error!(logger, "You must specify a subcommand, nts-ke or ntp.");
         process::exit(127);
     }
 
     if let Some(nts_ke) = matches.subcommand_matches("nts-ke") {
         let config_file = nts_ke.value_of("config_file").unwrap();
-        if let Err(err) = start_nts_ke_server(config_file) {
-            error!("Starting UDP server failed: {}", err);
+        if let Err(err) = start_nts_ke_server(&logger, config_file) {
+            error!(logger, "Starting NTS-KE server failed: {}", err);
             process::exit(127);
         }
     }
 
     if let Some(ntp) = matches.subcommand_matches("ntp") {
         let config_file = ntp.value_of("config_file").unwrap();
-        if let Err(err) = start_ntp_server(config_file) {
-            error!("Starting UDP server failed: {}", err);
+        if let Err(err) = start_ntp_server(&logger, config_file) {
+            error!(logger, "Starting UDP server failed: {}", err);
             process::exit(127);
         }
     }
 
     if let Some(nts_client) = matches.subcommand_matches("nts-client") {
         let config_file = nts_client.value_of("config_file").unwrap();
-        let res = run_nts_ke_client(config_file.to_string());
+        let res = run_nts_ke_client(&logger, config_file.to_string());
         match res {
             Err(_) => process::exit(127),
             Ok(_) => {}
         }
         let state = res.unwrap();
-        debug!("running next step with state {:?}", state);
-        let res = run_nts_ntp_client(state);
+        debug!(logger, "running UDP client with state {:x?}", state);
+        let res = run_nts_ntp_client(&logger, state);
         match res {
             Err(err) => {
-                println!("{:?}", err);
+                error!(logger, "Failure of client {:?}", err);
                 process::exit(127)
             }
             Ok(_) => {
-                println!("Succesful transaction");
+                info!(logger, "Successful transaction");
                 process::exit(0)
             }
         }

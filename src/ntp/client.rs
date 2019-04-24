@@ -10,6 +10,8 @@ use miscreant::aead;
 use miscreant::aead::Aead;
 use miscreant::aead::Aes128SivAead;
 
+use slog;
+
 use super::protocol::parse_nts_packet;
 use super::protocol::serialize_ntp_packet;
 use super::protocol::serialize_nts_packet;
@@ -20,11 +22,14 @@ use super::protocol::NtpPacket;
 use super::protocol::NtpPacketHeader;
 use super::protocol::NtsPacket;
 use super::protocol::PacketMode::Client;
-use log::{debug, error, info, trace, warn};
+use slog::{debug, error, info, trace, warn};
 
 const BUFF_SIZE: usize = 2048;
 /// Run the NTS client with the given data from key exchange
-pub fn run_nts_ntp_client(state: NtsKeResult) -> Result<u64, std::io::Error> {
+pub fn run_nts_ntp_client(
+    logger: &slog::Logger,
+    state: NtsKeResult,
+) -> Result<u64, std::io::Error> {
     let mut socket = UdpSocket::bind("0.0.0.0:0")?; // Address families make me sad
     let mut send_aead = Aes128SivAead::new(&state.keys.c2s);
     let mut recv_aead = Aes128SivAead::new(&state.keys.s2c);
@@ -63,7 +68,7 @@ pub fn run_nts_ntp_client(state: NtsKeResult) -> Result<u64, std::io::Error> {
     socket.connect((&state.next_server[..], state.next_port))?;
     let wire_packet = &serialize_nts_packet::<Aes128SivAead>(packet, &mut send_aead);
     socket.send(wire_packet)?;
-    info!("transmitting packet");
+    info!(logger, "transmitting packet");
     let mut buff = [0; BUFF_SIZE];
     let (size, origin) = socket.recv_from(&mut buff)?;
     let recieved = parse_nts_packet::<Aes128SivAead>(&buff[0..size], &mut recv_aead);

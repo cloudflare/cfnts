@@ -7,8 +7,8 @@ use crate::rotation::RotatingKeys;
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use lazy_static::lazy_static;
-use log::{debug, error, info, trace, warn};
 use prometheus::{opts, register_counter, register_int_counter, IntCounter, Opts};
+use slog::{debug, error, info, trace, warn};
 
 use std::collections::HashMap;
 use std::io;
@@ -64,8 +64,12 @@ struct ServerState {
     refstamp: u64,
 }
 
-/// start_ntp_server uns the ntp server with the config in filename
-pub fn start_ntp_server(config_filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// start_ntp_server runs the ntp server with the config in filename
+pub fn start_ntp_server(
+    logger: &slog::Logger,
+    config_filename: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let logger = logger.new(slog::o!("component"=>"ntp"));
     // First parse config for TLS server using local config module.
     let parsed_config = parse_ntp_config(config_filename);
 
@@ -78,13 +82,14 @@ pub fn start_ntp_server(config_filename: &str) -> Result<(), Box<dyn std::error:
         master_key: parsed_config.cookie_key,
         latest: [0; 8],
         keys: HashMap::new(),
+        logger: logger.clone(),
     };
-    info!("Initializing keys with memcached");
+    info!(logger, "Initializing keys with memcached");
     loop {
         let res = key_rot.rotate_keys();
         match res {
             Err(e) => {
-                error!("Failure to initialize key rotation: {:?}", e);
+                error!(logger, "Failure to initialize key rotation: {:?}", e);
                 std::thread::sleep(time::Duration::from_secs(10));
             }
             Ok(()) => break,
@@ -113,12 +118,12 @@ pub fn start_ntp_server(config_filename: &str) -> Result<(), Box<dyn std::error:
     };
 
     let socket = UdpSocket::bind(&addr)?;
-    info!("spawning metrics");
+    info!(logger, "spawning metrics");
     let metrics = parsed_config.metrics.clone();
     thread::spawn(move || {
         metrics::run_metrics(metrics);
     });
-    info!("Listening on: {}", socket.local_addr()?); // TODO: set up the option for kernel timestamping
+    info!(logger, "Listening on: {}", socket.local_addr()?); // TODO: set up the option for kernel timestamping
     loop {
         let mut buf = [0; BUF_SIZE];
 

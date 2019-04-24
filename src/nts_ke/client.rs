@@ -1,4 +1,4 @@
-use log::{debug, error, info, trace, warn};
+use slog::{debug, error, info, trace, warn};
 use std::error;
 use std::error::Error;
 use std::fmt;
@@ -97,7 +97,10 @@ fn process_record(
 }
 
 /// run_nts_client executes the nts client with the config in config file
-pub fn run_nts_ke_client(config_file: String) -> Result<NtsKeResult, Box<dyn Error>> {
+pub fn run_nts_ke_client(
+    logger: &slog::Logger,
+    config_file: String,
+) -> Result<NtsKeResult, Box<dyn Error>> {
     let parsed_config = config::parse_nts_client_config(&config_file);
     let mut tls_config = rustls::ClientConfig::new();
     let alpn_proto = String::from("ntske/1");
@@ -106,7 +109,7 @@ pub fn run_nts_ke_client(config_file: String) -> Result<NtsKeResult, Box<dyn Err
     tls_config.versions = vec![rustls::ProtocolVersion::TLSv1_2]; // work around bug somewhere.
     match parsed_config.trusted_cert {
         Some(certs) => {
-            info!("loading custom trust root");
+            info!(logger, "loading custom trust root");
             tls_config.root_store.add(&certs);
         }
         None => tls_config
@@ -116,7 +119,7 @@ pub fn run_nts_ke_client(config_file: String) -> Result<NtsKeResult, Box<dyn Err
     let rc_config = Arc::new(tls_config);
     let hostname = webpki::DNSNameRef::try_from_ascii_str(&parsed_config.host).unwrap();
     let mut client = rustls::ClientSession::new(&rc_config, hostname);
-    info!("Connecting");
+    info!(logger, "Connecting");
     let mut stream = TcpStream::connect((&parsed_config.host as &str, parsed_config.port)).unwrap();
     let mut tls_stream = rustls::Stream::new(&mut client, &mut stream);
     let mut buf = Vec::new();
@@ -143,7 +146,7 @@ pub fn run_nts_ke_client(config_file: String) -> Result<NtsKeResult, Box<dyn Err
     tls_stream.write(&protocol::serialize_record(&mut aead_rec))?;
     tls_stream.write(&protocol::serialize_record(&mut end_rec))?;
     tls_stream.flush()?;
-    info!("Request transmitted");
+    info!(logger, "Request transmitted");
     let res = tls_stream.read_to_end(&mut buf); // They might not close it!
     let keys = protocol::gen_key(&client).unwrap();
 
@@ -157,13 +160,13 @@ pub fn run_nts_ke_client(config_file: String) -> Result<NtsKeResult, Box<dyn Err
         aead_scheme: DEFAULT_SCHEME,
     };
 
-    debug!("Response returned of length: {:}", buf.len());
+    debug!(logger, "Response returned of length: {:}", buf.len());
     let mut curr = 0;
     while curr < buf.len() {
         let rec = protocol::deserialize_record(&buf[curr..]);
         match rec {
             Ok((Some(rec), len)) => {
-                debug!("Record: {:?}", rec);
+                debug!(logger, "Record: {:?}", rec);
                 let status = process_record(rec, &mut state);
                 match status {
                     Ok(_) => {}
@@ -172,11 +175,11 @@ pub fn run_nts_ke_client(config_file: String) -> Result<NtsKeResult, Box<dyn Err
                 curr += len;
             }
             Ok((None, len)) => {
-                debug!("Unknown record type");
+                debug!(logger, "Unknown record type");
                 curr += len;
             }
             Err(err) => {
-                debug!("error: {:?}", err);
+                debug!(logger, "error: {:?}", err);
                 return Err(Box::new(err));
             }
         }

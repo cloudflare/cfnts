@@ -1,5 +1,4 @@
 // Our goal is to shove data at prometheus in response to requests.
-
 use prometheus::{self, Encoder, TextEncoder};
 use std::io;
 use std::io::Write;
@@ -22,6 +21,7 @@ fn serve_metrics(mut dest: net::TcpStream) -> () {
     dest.shutdown(net::Shutdown::Write);
 }
 
+/// Runs the metric server on the address and port set in config
 pub fn run_metrics(conf: config::MetricsConfig) -> Result<(), std::io::Error> {
     let accept = net::TcpListener::bind((conf.addr.as_str(), conf.port))?;
     for stream in accept.incoming() {

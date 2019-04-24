@@ -81,7 +81,6 @@ pub fn parse_nts_ke_config(config_filename: &str) -> ConfigNTSKE {
 }
 
 pub fn parse_ntp_config(config_filename: &str) -> ConfigNTP {
-    println!("PARSING CONFIG");
     let mut settings = Config::default();
     settings
         .merge(config::File::with_name(config_filename))
@@ -100,7 +99,6 @@ pub fn parse_ntp_config(config_filename: &str) -> ConfigNTP {
             addr: settings.get_str("metrics_addr").unwrap(),
         },
     };
-    println!("PARSED CONFIG");
     config
 }
 

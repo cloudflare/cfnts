@@ -1,5 +1,6 @@
 FROM docker.cfops.it/debian/stretch:2018.3.0
+RUN apt-get update && apt-get install -y prometheus
+
 COPY . .
 
-RUN apt-get update && apt-get install -y prometheus
 CMD ["./scripts/run_client.sh"]

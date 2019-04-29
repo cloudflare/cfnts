@@ -28,10 +28,12 @@ use super::protocol::{
     extract_extension, has_extension, is_nts_packet, parse_ntp_packet, parse_nts_packet,
     serialize_header, serialize_ntp_packet, serialize_nts_packet, LeapState, LeapState::*,
     NtpExtension, NtpExtensionType::NTSCookie, NtpExtensionType::UniqueIdentifier, NtpPacket,
-    NtpPacketHeader, NtsPacket, PacketMode, PacketMode::*, UNIX_OFFSET,
+    NtpPacketHeader, NtsPacket, PacketMode, PacketMode::*, PHI, UNIX_OFFSET,
 };
 
 const BUF_SIZE: usize = 1280; // Anything larger might fragment.
+const TWO_POW_32: f64 = 4294967296.0;
+const TWO_POW_16: f64 = 65536.0;
 
 lazy_static! {
     static ref QUERY_COUNTER: IntCounter =
@@ -60,6 +62,16 @@ lazy_static! {
         "Number of cookies we could not decrypt"
     )
     .unwrap();
+    static ref UPSTREAM_QUERY_COUNTER: IntCounter = register_int_counter!(
+        "ntp_upstream_queries_total",
+        "Number of upstream queries sent"
+    )
+    .unwrap();
+    static ref UPSTREAM_FAILURE_COUNTER: IntCounter = register_int_counter!(
+        "ntp_upstream_failures_total",
+        "Number of failed upstream queries"
+    )
+    .unwrap();
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -73,12 +85,13 @@ struct ServerState {
     root_dispersion: u32,
     refid: u32,
     refstamp: u64,
+    taken: SystemTime,
 }
 
 fn run_server(
     socket: UdpSocket,
     keys: Arc<RwLock<RotatingKeys>>,
-    servstate: &ServerState,
+    servstate: Arc<RwLock<ServerState>>,
     logger: slog::Logger,
 ) -> Result<(), std::io::Error> {
     loop {
@@ -88,7 +101,14 @@ fn run_server(
         let ts = SystemTime::now();
 
         let buf = &mut buf[..amt];
-        let resp = response(buf, ts, keys.clone(), servstate, logger.clone(), src);
+        let resp = response(
+            buf,
+            ts,
+            keys.clone(),
+            servstate.clone(),
+            logger.clone(),
+            src,
+        );
         match resp {
             Ok(data) => {
                 let resp = socket.send_to(&data, &src);
@@ -104,7 +124,7 @@ fn run_server(
     }
 }
 
-/// start_ntp_server runs the ntp server with the config in filename
+/// start_ntp_server runs the ntp server with the config specified in config_filename
 pub fn start_ntp_server(
     logger: &slog::Logger,
     config_filename: &str,
@@ -138,9 +158,9 @@ pub fn start_ntp_server(
     let keys = Arc::new(RwLock::new(key_rot));
     periodic_rotate(keys.clone());
 
-    let servstate = ServerState {
-        leap: NoLeap,
-        stratum: 1,
+    let servstate_struct = ServerState {
+        leap: Unknown,
+        stratum: 16,
         version: protocol::VERSION,
         poll: 7,
         precision: -18,
@@ -148,7 +168,28 @@ pub fn start_ntp_server(
         root_dispersion: 10,
         refid: 0,
         refstamp: 0,
+        taken: SystemTime::now(),
     };
+
+    let servstate = Arc::new(RwLock::new(servstate_struct));
+    match parsed_config.upstream_addr {
+        Some((host, port)) => {
+            info!(logger, "connecting to upstream");
+            let servstate = servstate.clone();
+            let rot_logger = logger.new(slog::o!("task"=>"refereshing servstate"));
+            let socket = UdpSocket::bind("127.0.0.1:0")?; // we only go to local
+            socket.set_read_timeout(Some(time::Duration::from_secs(1)));
+            thread::spawn(move || {
+                refresh_servstate(servstate, rot_logger, socket, host, port);
+            });
+        }
+        None => {
+            let mut state_guard = servstate.write().unwrap();
+            info!(logger, "setting stratum to 1");
+            (*state_guard).leap = NoLeap;
+            (*state_guard).stratum = 1;
+        }
+    }
 
     let metrics = parsed_config.metrics.clone();
     info!(logger, "spawning metrics");
@@ -164,9 +205,10 @@ pub fn start_ntp_server(
         let wg = wg.clone();
         let logger = logger.new(slog::o!("listen_addr"=>addr));
         let keys = keys.clone();
+        let servstate = servstate.clone();
         info!(logger, "Listening on: {}", socket.local_addr()?); // TODO: set up the option for kernel timestamping
         thread::spawn(move || {
-            run_server(socket, keys, &servstate, logger);
+            run_server(socket, keys, servstate, logger);
             drop(wg);
         });
     }
@@ -174,25 +216,39 @@ pub fn start_ntp_server(
     Ok(())
 }
 
-fn response(
-    query: &[u8],
-    time: SystemTime,
-    cookie_keys: Arc<RwLock<RotatingKeys>>,
-    servstate: &ServerState,
-    logger: slog::Logger,
-    src: SocketAddr,
-) -> Result<Vec<u8>, std::io::Error> {
-    // This computes the NTP timestamp of the response
-    let unix_time = time.duration_since(SystemTime::UNIX_EPOCH).unwrap(); // Safe absent time machines
+/// Compute the current dispersion to within 1 ULP.
+fn fix_dispersion(disp: u32, now: SystemTime, taken: SystemTime) -> u32 {
+    let disp_frac = (disp & 0x0000ffff) as f64;
+    let disp_secs = ((disp & 0xffff0000) >> 16) as f64;
+    let dispf = disp_secs + disp_frac / TWO_POW_16;
+    let diff = now.duration_since(taken);
+    match diff {
+        Ok(secs) => {
+            let curdispf = dispf + (secs.as_secs() as f64) * PHI;
+            let curdisp_secs = curdispf.floor() as u32;
+            let curdisp_frac = (curdispf * 65336.0).floor() as u32;
+            let curdisp = (curdisp_secs << 16) + curdisp_frac;
+            curdisp
+        }
+        Err(_) => disp,
+    }
+}
+
+fn create_header(
+    query_packet: &NtpPacket,
+    received: SystemTime,
+    servstate: Arc<RwLock<ServerState>>,
+) -> NtpPacketHeader {
+    let servstate = servstate.read().unwrap();
+    let unix_time = received.duration_since(SystemTime::UNIX_EPOCH).unwrap(); // Safe absent time machines
     let unix_offset = Duration::new(UNIX_OFFSET, 0);
     let epoch_time = unix_offset + unix_time;
     let ts_secs = epoch_time.as_secs();
     let ts_nanos = epoch_time.subsec_nanos() as f64;
-    let ts_frac = ((ts_nanos * 4294967296.0) / 1.0e9).round() as u32;
+    let ts_frac = ((ts_nanos * TWO_POW_32) / 1.0e9).round() as u32;
     // RFC 5905  Figure 3
     let response_timestamp = (ts_secs << 32) + ts_frac as u64;
-    let query_packet = parse_ntp_packet(query)?; // Should try to send a KOD if this happens
-    let resp_header = NtpPacketHeader {
+    NtpPacketHeader {
         leap_indicator: servstate.leap,
         version: servstate.version,
         mode: PacketMode::Server,
@@ -200,13 +256,26 @@ fn response(
         precision: servstate.precision,
         stratum: servstate.stratum,
         root_delay: servstate.root_delay,
-        root_dispersion: servstate.root_dispersion,
+        root_dispersion: fix_dispersion(servstate.root_dispersion, received, servstate.taken),
         reference_id: servstate.refid,
         reference_timestamp: servstate.refstamp,
         origin_timestamp: query_packet.header.transmit_timestamp,
         receive_timestamp: response_timestamp,
         transmit_timestamp: response_timestamp,
-    };
+    }
+}
+
+fn response(
+    query: &[u8],
+    time: SystemTime,
+    cookie_keys: Arc<RwLock<RotatingKeys>>,
+    servstate: Arc<RwLock<ServerState>>,
+    logger: slog::Logger,
+    src: SocketAddr,
+) -> Result<Vec<u8>, std::io::Error> {
+    let query_packet = parse_ntp_packet(query)?; // We should attempt a KOD in response to a mangled packet
+    let resp_header = create_header(&query_packet, time, servstate);
+
     QUERY_COUNTER.inc();
 
     if query_packet.header.mode != PacketMode::Client {
@@ -347,4 +416,69 @@ fn kiss_of_death(query_packet: NtpPacket) -> NtpPacket {
             .push(extract_extension(&query_packet, UniqueIdentifier).unwrap());
     }
     kod_packet
+}
+
+fn refresh_servstate(
+    servstate: Arc<RwLock<ServerState>>,
+    logger: slog::Logger,
+    sock: std::net::UdpSocket,
+    host: String,
+    port: u16,
+) {
+    let host = host.as_str();
+    loop {
+        let query_packet = NtpPacket {
+            header: NtpPacketHeader {
+                leap_indicator: LeapState::Unknown,
+                version: 4,
+                mode: PacketMode::Client,
+                poll: 0,
+                precision: 0,
+                stratum: 0,
+                root_delay: 0,
+                root_dispersion: 0,
+                reference_id: 0x0,
+                reference_timestamp: 0,
+                origin_timestamp: 0,
+                receive_timestamp: 0,
+                transmit_timestamp: 0,
+            },
+            exts: vec![],
+        };
+        sock.connect((host, port));
+        sock.send(&serialize_ntp_packet(query_packet));
+        UPSTREAM_QUERY_COUNTER.inc();
+        let mut buff = [0; 2048];
+        let res = sock.recv_from(&mut buff);
+        match res {
+            Ok((size, _sender)) => {
+                let response = parse_ntp_packet(&buff[0..size]);
+                match response {
+                    Ok(packet) => {
+                        let mut state = servstate.write().unwrap();
+                        state.leap = packet.header.leap_indicator;
+                        state.version = 4;
+                        state.poll = packet.header.poll;
+                        state.precision = packet.header.precision;
+                        state.stratum = packet.header.stratum;
+                        state.root_delay = packet.header.root_delay;
+                        state.root_dispersion = packet.header.root_dispersion;
+                        state.refid = packet.header.reference_id;
+                        state.refstamp = packet.header.reference_timestamp;
+                        state.taken = SystemTime::now();
+                        info!(logger, "set server state with stratum {:}", state.stratum);
+                    }
+                    Err(err) => {
+                        UPSTREAM_FAILURE_COUNTER.inc();
+                        error!(logger, "failure to parse response: {}", err);
+                    }
+                }
+            }
+            Err(err) => {
+                UPSTREAM_FAILURE_COUNTER.inc();
+                error!(logger, "read error: {}", err);
+            }
+        }
+        thread::sleep(time::Duration::from_secs(1));
+    }
 }

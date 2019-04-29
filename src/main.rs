@@ -22,7 +22,7 @@ use sloggers::terminal::{Destination, TerminalLoggerBuilder};
 use sloggers::types::Severity;
 use sloggers::Build;
 
-use crate::ntp::client::run_nts_ntp_client;
+use crate::ntp::client::{run_nts_ntp_client, NtpResult};
 use crate::ntp::server::start_ntp_server;
 use crate::nts_ke::client::run_nts_ke_client;
 use crate::nts_ke::server::start_nts_ke_server;
@@ -85,7 +85,7 @@ fn main() {
         let config_file = ntp.value_of("config_file").unwrap();
         if let Err(err) = start_ntp_server(&logger, config_file) {
             error!(logger, "Starting UDP server failed: {}", err);
-            process::exit(127);
+            process::exit(126);
         }
     }
 
@@ -93,7 +93,7 @@ fn main() {
         let config_file = nts_client.value_of("config_file").unwrap();
         let res = run_nts_ke_client(&logger, config_file.to_string());
         match res {
-            Err(_) => process::exit(127),
+            Err(_) => process::exit(126),
             Ok(_) => {}
         }
         let state = res.unwrap();
@@ -102,10 +102,11 @@ fn main() {
         match res {
             Err(err) => {
                 error!(logger, "Failure of client {:?}", err);
-                process::exit(127)
+                process::exit(126)
             }
-            Ok(_) => {
+            Ok(result) => {
                 info!(logger, "Successful transaction");
+                println!("stratum: {:}", result.stratum);
                 process::exit(0)
             }
         }

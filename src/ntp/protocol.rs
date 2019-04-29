@@ -11,9 +11,10 @@ use self::LeapState::*;
 use self::NtpExtensionType::*;
 use self::PacketMode::*;
 
+/// These numbers are from RFC 5905
 pub const VERSION: u8 = 4;
-
 pub const UNIX_OFFSET: u64 = 2_208_988_800;
+pub const PHI: f64 = 15e-6;
 
 const HEADER_SIZE: u64 = 48;
 const NONCE_LEN: usize = 32;

@@ -31,6 +31,7 @@ pub struct ConfigNTP {
     pub cookie_key: Vec<u8>,
     pub memcached_url: String,
     pub metrics: MetricsConfig,
+    pub upstream_addr: Option<(String, u16)>,
 }
 
 #[derive(Debug)]
@@ -105,6 +106,15 @@ pub fn parse_ntp_config(config_filename: &str) -> ConfigNTP {
         metrics: MetricsConfig {
             port: settings.get_int("metrics_port").unwrap() as u16,
             addr: settings.get_str("metrics_addr").unwrap(),
+        },
+        upstream_addr: {
+            match settings.get_str("upstream_host") {
+                Ok(host) => match settings.get_int("upstream_port") {
+                    Ok(port) => Some((host, port as u16)),
+                    Err(_) => None,
+                },
+                Err(_) => None,
+            }
         },
     };
     config

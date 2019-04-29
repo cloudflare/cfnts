@@ -1,16 +1,15 @@
 use crate::cookie;
 use crate::nts_ke::client::NtsKeResult;
-use rand::Rng;
-use std::boxed::Box;
-use std::net::UdpSocket;
-use std::time::Duration;
-use std::time::SystemTime;
 
 use miscreant::aead;
 use miscreant::aead::Aead;
 use miscreant::aead::Aes128SivAead;
+use rand::Rng;
+use slog::{debug, error, info, trace, warn};
 
-use slog;
+use std::boxed::Box;
+use std::net::UdpSocket;
+use std::time::{Duration, SystemTime};
 
 use super::protocol::parse_nts_packet;
 use super::protocol::serialize_ntp_packet;
@@ -22,14 +21,19 @@ use super::protocol::NtpPacket;
 use super::protocol::NtpPacketHeader;
 use super::protocol::NtsPacket;
 use super::protocol::PacketMode::Client;
-use slog::{debug, error, info, trace, warn};
 
 const BUFF_SIZE: usize = 2048;
+
+pub struct NtpResult {
+    pub stratum: u8,
+    pub time_diff: f64,
+}
+
 /// Run the NTS client with the given data from key exchange
 pub fn run_nts_ntp_client(
     logger: &slog::Logger,
     state: NtsKeResult,
-) -> Result<u64, std::io::Error> {
+) -> Result<NtpResult, std::io::Error> {
     let mut socket = UdpSocket::bind("0.0.0.0:0")?; // Address families make me sad
     let mut send_aead = Aes128SivAead::new(&state.keys.c2s);
     let mut recv_aead = Aes128SivAead::new(&state.keys.s2c);
@@ -74,6 +78,9 @@ pub fn run_nts_ntp_client(
     let recieved = parse_nts_packet::<Aes128SivAead>(&buff[0..size], &mut recv_aead);
     match recieved {
         Err(x) => Err(x),
-        Ok(_) => Ok(0),
+        Ok(packet) => Ok(NtpResult {
+            stratum: packet.header.stratum,
+            time_diff: 0.0,
+        }),
     }
 }

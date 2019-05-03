@@ -2,8 +2,7 @@ use crate::config::parse_ntp_config;
 
 use crate::cookie::{eat_cookie, get_keyid, make_cookie, NTSKeys, COOKIE_SIZE};
 use crate::metrics;
-use crate::rotation;
-use crate::rotation::RotatingKeys;
+use crate::rotation::{periodic_rotate, RotatingKeys};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use lazy_static::lazy_static;
@@ -11,19 +10,12 @@ use prometheus::{opts, register_counter, register_int_counter, IntCounter, Opts}
 use slog::{debug, error, info, trace, warn};
 
 use std::collections::HashMap;
-use std::io;
-use std::io::Cursor;
-use std::io::Error;
-use std::io::ErrorKind;
-use std::net::SocketAddr;
-use std::net::ToSocketAddrs;
-use std::net::UdpSocket;
-use std::sync::Arc;
-use std::sync::RwLock;
+use std::io::{Cursor, Error, ErrorKind};
+use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time;
-use std::time::Duration;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 /// Miscreant calls Aes128SivAead what IANA calls AEAD_AES_SIV_CMAC_256
 use miscreant::aead::Aead;
@@ -49,6 +41,23 @@ lazy_static! {
     .unwrap();
     static ref KOD_COUNTER: IntCounter =
         register_int_counter!("ntp_kod_total", "Number of Kiss of Death packets sent").unwrap();
+    static ref MALFORMED_COOKIE_COUNTER: IntCounter = register_int_counter!(
+        "ntp_malformed_cookie_total",
+        "Number of cookies with malformations"
+    )
+    .unwrap();
+    static ref MANGLED_PACKET_COUNTER: IntCounter = register_int_counter!(
+        "ntp_mangled_packet_total",
+        "Number of packets without valid ntp headers"
+    )
+    .unwrap();
+    static ref MISSING_KEY_COUNTER: IntCounter =
+        register_int_counter!("ntp_missing_key_total", "Number of keys we could not find").unwrap();
+    static ref UNDECRYPTABLE_COOKIE_COUNTER: IntCounter = register_int_counter!(
+        "ntp_undecryptable_cookie_total",
+        "Number of cookies we could not decrypt"
+    )
+    .unwrap();
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -96,7 +105,7 @@ pub fn start_ntp_server(
         }
     }
     let keys = Arc::new(RwLock::new(key_rot));
-    rotation::periodic_rotate(keys.clone());
+    periodic_rotate(keys.clone());
 
     let addr = parsed_config
         .addr
@@ -131,10 +140,18 @@ pub fn start_ntp_server(
         let ts = SystemTime::now();
 
         let buf = &mut buf[..amt];
-        let resp = response(buf, ts, keys.clone(), servstate);
+        let resp = response(buf, ts, keys.clone(), servstate, logger.clone(), src);
         match resp {
-            Ok(data) => socket.send_to(&data, &src)?,
-            Err(_) => 0,
+            Ok(data) => {
+                let resp = socket.send_to(&data, &src);
+                if let Err(err) = resp {
+                    error!(logger, "error sending response: {:}", err; "client" => src);
+                }
+            }
+            Err(_) => {
+                MANGLED_PACKET_COUNTER.inc(); // The packet is too mangled to do much with.
+                error!(logger, "mangled packet"; "client"=>src);
+            }
         };
     }
 }
@@ -144,6 +161,8 @@ fn response(
     time: SystemTime,
     cookie_keys: Arc<RwLock<RotatingKeys>>,
     servstate: ServerState,
+    logger: slog::Logger,
+    src: SocketAddr,
 ) -> Result<Vec<u8>, std::io::Error> {
     // This computes the NTP timestamp of the response
     let unix_time = time.duration_since(SystemTime::UNIX_EPOCH).unwrap(); // Safe absent time machines
@@ -193,13 +212,25 @@ fn response(
                                 cookie_keys.clone(),
                                 query,
                             )),
-                            None => send_kiss_of_death(query_packet),
+                            None => {
+                                UNDECRYPTABLE_COOKIE_COUNTER.inc();
+                                error!(logger, "undecryptable cookie with keyid {:x?}", keyid; "client" => src);
+                                send_kiss_of_death(query_packet)
+                            }
                         }
                     }
-                    None => send_kiss_of_death(query_packet),
+                    None => {
+                        MISSING_KEY_COUNTER.inc();
+                        error!(logger, "cannot access key {:x?}", keyid; "client" => src);
+                        send_kiss_of_death(query_packet)
+                    }
                 }
             }
-            None => send_kiss_of_death(query_packet),
+            None => {
+                MALFORMED_COOKIE_COUNTER.inc();
+                error!(logger, "malformed cookie"; "client"=>src);
+                send_kiss_of_death(query_packet)
+            }
         }
     } else {
         Ok(serialize_header(resp_header))
@@ -240,8 +271,9 @@ fn nts_response(
             protocol::NtpExtensionType::UniqueIdentifier => resp_packet.auth_exts.push(ext),
             protocol::NtpExtensionType::NTSCookiePlaceholder => {
                 if ext.contents.len() >= COOKIE_SIZE {
-                    // Avoid amplification by requiring cookie placeholders to be as long as our cookies
-                    let (id, curr_key) = cookie_keys.read().unwrap().latest();
+                    // Avoid amplification
+                    let keymaker = cookie_keys.read().unwrap();
+                    let (id, curr_key) = keymaker.latest();
                     let cookie = make_cookie(keys, &curr_key, &id);
                     resp_packet.auth_enc_exts.push(NtpExtension {
                         ext_type: NTSCookie,

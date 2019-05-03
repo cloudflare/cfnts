@@ -1,36 +1,22 @@
-extern crate byteorder;
-use crate::config::parse_ntp_config;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
-
-use log::{debug, error, info, trace, warn};
+use miscreant::aead::Aead;
+use rand::Rng;
 
 use std::boxed::Box;
-use std::io;
-use std::io::Cursor;
-use std::io::Error;
-use std::io::ErrorKind;
-use std::io::Read;
-use std::io::Write;
-use std::net::SocketAddr;
-use std::net::ToSocketAddrs;
-use std::net::UdpSocket;
+use std::io::{Cursor, Error, ErrorKind, Read, Write};
 use std::panic;
-use std::time::Duration;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use self::LeapState::*;
 use self::NtpExtensionType::*;
 use self::PacketMode::*;
-
-use miscreant::aead::Aead;
-
-use rand::Rng;
 
 pub const VERSION: u8 = 4;
 
 pub const UNIX_OFFSET: u64 = 2_208_988_800;
 
 const HEADER_SIZE: u64 = 48;
+const NONCE_LEN: usize = 32;
 const EXT_TYPE_UNIQUE_IDENTIFIER: u16 = 0x0104;
 const EXT_TYPE_NTS_COOKIE: u16 = 0x0204;
 const EXT_TYPE_NTS_COOKIE_PLACEHOLDER: u16 = 0x0304;
@@ -382,12 +368,12 @@ pub fn serialize_nts_packet<T: Aead>(packet: NtsPacket, encryptor: &mut T) -> Ve
     buff.write_all(&serialize_header(packet.header));
     buff.write_all(&serialize_extensions(packet.auth_exts));
     let plaintext = serialize_extensions(packet.auth_enc_exts);
-    let mut nonce = [0; 32];
+    let mut nonce = [0; NONCE_LEN];
     rand::thread_rng().fill(&mut nonce);
     let ciphertext = encryptor.seal(&nonce, &buff.get_ref(), &plaintext);
 
     let mut authent_buffer = Cursor::new(Vec::new());
-    authent_buffer.write_u16::<BigEndian>(32); // length of the nonce
+    authent_buffer.write_u16::<BigEndian>(NONCE_LEN as u16); // length of the nonce
     authent_buffer.write_u16::<BigEndian>(ciphertext.len() as u16);
     authent_buffer.write_all(&nonce); // 32 bytes so no padding
     authent_buffer.write_all(&ciphertext);

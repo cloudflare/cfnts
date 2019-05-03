@@ -1,11 +1,11 @@
+use byteorder::{BigEndian, WriteBytesExt};
 use lazy_static::lazy_static;
 use prometheus::{opts, register_counter, register_int_counter, IntCounter, Opts};
 use slog::{debug, error, info, trace, warn};
 
-use crate::metrics;
 use std::collections::HashMap;
 use std::io;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, ErrorKind, Read, Write};
 use std::net::ToSocketAddrs;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -19,20 +19,15 @@ extern crate rustls;
 use rustls::{NoClientAuth, ServerConfig, Session};
 
 use crate::config::parse_nts_ke_config;
-
-use crate::cookie;
-use crate::cookie::NTSKeys;
-
-use crate::rotation;
-use crate::rotation::RotatingKeys;
-
-use byteorder::{BigEndian, WriteBytesExt};
-
-const LISTENER: mio::Token = mio::Token(0);
+use crate::cookie::{make_cookie, NTSKeys};
+use crate::metrics;
+use crate::rotation::{periodic_rotate, RotatingKeys};
 
 use super::protocol::gen_key;
 use super::protocol::serialize_record;
 use super::protocol::{NtsKeRecord, NtsKeType};
+
+const LISTENER: mio::Token = mio::Token(0);
 
 // TODO: add timeouts, explicitly
 lazy_static! {
@@ -76,7 +71,7 @@ fn response(keys: NTSKeys, master_key: &Arc<RwLock<RotatingKeys>>, port: &u16) -
     let rotor = master_key.read().unwrap();
     let (epoch, actual_key) = rotor.latest();
     for _i in 1..8 {
-        let cookie = cookie::make_cookie(keys, &actual_key, &epoch);
+        let cookie = make_cookie(keys, &actual_key, &epoch);
         let mut cookie_rec = NtsKeRecord {
             critical: false,
             record_type: NtsKeType::NewCookie,
@@ -244,7 +239,7 @@ impl Connection {
         if rc.is_err() {
             let err = rc.unwrap_err();
 
-            if let io::ErrorKind::WouldBlock = err.kind() {
+            if let ErrorKind::WouldBlock = err.kind() {
                 return;
             }
 
@@ -379,8 +374,8 @@ pub fn start_nts_ke_server(
         let res = key_rot.rotate_keys();
         match res {
             Err(e) => {
-                error!(logger, "Failure to initialize key rotation: {:?}", e);
                 ERROR_COUNTER.inc();
+                error!(logger, "Failure to initialize key rotation: {:?}", e);
                 std::thread::sleep(time::Duration::from_secs(10));
             }
             Ok(()) => break,
@@ -392,7 +387,7 @@ pub fn start_nts_ke_server(
     thread::spawn(move || {
         metrics::run_metrics(metrics);
     });
-    rotation::periodic_rotate(keys.clone());
+    periodic_rotate(keys.clone());
     let mut server_config = ServerConfig::new(NoClientAuth::new());
     let alpn_proto = String::from("ntske/1");
     let alpn_bytes = alpn_proto.into_bytes();

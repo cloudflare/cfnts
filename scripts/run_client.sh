@@ -5,6 +5,11 @@ sleep 30
 ./target/debug/nts nts-client tests/nts-client.yaml > result.txt
 awk '{if ($2 != 1) exit 1}' < result.txt
 ./target/debug/nts nts-client tests/nts-client-upper.yaml
+for i in {1..1000}
+do
+    ./target/debug/nts nts-client tests/nts-client.yaml &
+done
+wait -n
 curl server:8000/metrics | promtool check metrics
 curl server:8001/metrics | promtool check metrics
 curl server:8002/metrics | promtool check metrics

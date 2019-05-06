@@ -14,18 +14,19 @@ pub struct MetricsConfig {
     pub addr: String,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ConfigNTSKE {
     pub tls_certs: Vec<Certificate>,
     pub tls_keys: Vec<PrivateKey>,
     pub cookie_key: Vec<u8>,
     pub addrs: Vec<String>,
     pub next_port: u16,
+    pub conn_timeout: Option<u64>,
     pub memcached_url: String,
     pub metrics: MetricsConfig,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ConfigNTP {
     pub addrs: Vec<String>,
     pub cookie_key: Vec<u8>,
@@ -34,7 +35,7 @@ pub struct ConfigNTP {
     pub upstream_addr: Option<(String, u16)>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ConfigNTSClient {
     pub host: String,
     pub port: u16,
@@ -81,6 +82,10 @@ pub fn parse_nts_ke_config(config_filename: &str) -> ConfigNTSKE {
         memcached_url: settings.get_str("memc_url").unwrap_or("".to_string()),
         addrs: to_string(settings.get_array("addr").unwrap()),
         next_port: settings.get_int("next_port").unwrap() as u16,
+        conn_timeout: match settings.get_int("conn_timeout") {
+            Err(_) => None,
+            Ok(val) => Some(val as u64),
+        },
         metrics: MetricsConfig {
             port: settings.get_int("metrics_port").unwrap() as u16,
             addr: settings.get_str("metrics_addr").unwrap(),

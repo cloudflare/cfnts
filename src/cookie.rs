@@ -2,15 +2,15 @@ use miscreant::aead;
 use miscreant::aead::Aead;
 use rand::Rng;
 
-pub const COOKIE_SIZE: usize = 120;
+pub const COOKIE_SIZE: usize = 100;
 #[derive(Debug, Copy, Clone)]
 pub struct NTSKeys {
     pub c2s: [u8; 32],
     pub s2c: [u8; 32],
 }
 
-pub fn make_cookie(keys: NTSKeys, master_key: &[u8], key_id: &[u8; 8]) -> Vec<u8> {
-    let mut nonce = [0; 32];
+pub fn make_cookie(keys: NTSKeys, master_key: &[u8], key_id: &[u8; 4]) -> Vec<u8> {
+    let mut nonce = [0; 16];
     rand::thread_rng().fill(&mut nonce);
     let mut plaintext = [0; 64];
     for i in 0..32 {
@@ -29,10 +29,10 @@ pub fn make_cookie(keys: NTSKeys, master_key: &[u8], key_id: &[u8; 8]) -> Vec<u8
 }
 
 pub fn get_keyid(cookie: &[u8]) -> Option<&[u8]> {
-    if cookie.len() < 8 {
+    if cookie.len() < 4 {
         None
     } else {
-        Some(&cookie[0..8])
+        Some(&cookie[0..4])
     }
 }
 
@@ -56,9 +56,9 @@ pub fn eat_cookie(cookie: &[u8], key: &[u8]) -> Option<NTSKeys> {
     if cookie.len() < 40 {
         return None;
     }
-    let ciphertext = &cookie[8..];
+    let ciphertext = &cookie[4..];
     let mut aead = aead::Aes128SivAead::new(&key);
-    let answer = aead.open(&ciphertext[0..32], &[], &ciphertext[32..]);
+    let answer = aead.open(&ciphertext[0..16], &[], &ciphertext[16..]);
     match answer {
         Err(_) => None,
         Ok(buf) => unpack(buf),
@@ -84,7 +84,7 @@ mod tests {
         };
 
         let master_key = [0x07; 32];
-        let key_id = [0x03; 8];
+        let key_id = [0x03; 4];
         let mut cookie = make_cookie(test, &master_key, &key_id);
         let ret = get_keyid(&cookie);
 

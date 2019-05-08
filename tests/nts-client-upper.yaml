@@ -1,0 +1,3 @@
+host: server
+port: 4321
+trusted_certificate: tests/ca.pem

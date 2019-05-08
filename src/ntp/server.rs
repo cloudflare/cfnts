@@ -12,11 +12,13 @@ use slog::{debug, error, info, trace, warn};
 use std::collections::HashMap;
 use std::io::{Cursor, Error, ErrorKind};
 use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time;
 use std::time::{Duration, SystemTime};
 
+use crossbeam::sync::WaitGroup;
 /// Miscreant calls Aes128SivAead what IANA calls AEAD_AES_SIV_CMAC_256
 use miscreant::aead::Aead;
 use miscreant::aead::Aes128SivAead;
@@ -73,6 +75,35 @@ struct ServerState {
     refstamp: u64,
 }
 
+fn run_server(
+    socket: UdpSocket,
+    keys: Arc<RwLock<RotatingKeys>>,
+    servstate: &ServerState,
+    logger: slog::Logger,
+) -> Result<(), std::io::Error> {
+    loop {
+        let mut buf = [0; BUF_SIZE];
+
+        let (amt, src) = socket.recv_from(&mut buf)?;
+        let ts = SystemTime::now();
+
+        let buf = &mut buf[..amt];
+        let resp = response(buf, ts, keys.clone(), servstate, logger.clone(), src);
+        match resp {
+            Ok(data) => {
+                let resp = socket.send_to(&data, &src);
+                if let Err(err) = resp {
+                    error!(logger, "error sending response: {:}", err; "client" => src);
+                }
+            }
+            Err(_) => {
+                MANGLED_PACKET_COUNTER.inc(); // The packet is too mangled to do much with.
+                error!(logger, "mangled packet"; "client"=>src);
+            }
+        };
+    }
+}
+
 /// start_ntp_server runs the ntp server with the config in filename
 pub fn start_ntp_server(
     logger: &slog::Logger,
@@ -107,13 +138,6 @@ pub fn start_ntp_server(
     let keys = Arc::new(RwLock::new(key_rot));
     periodic_rotate(keys.clone());
 
-    let addr = parsed_config
-        .addr
-        .to_socket_addrs()
-        .unwrap()
-        .next()
-        .unwrap();
-
     let servstate = ServerState {
         leap: NoLeap,
         stratum: 1,
@@ -126,41 +150,35 @@ pub fn start_ntp_server(
         refstamp: 0,
     };
 
-    let socket = UdpSocket::bind(&addr)?;
-    info!(logger, "spawning metrics");
     let metrics = parsed_config.metrics.clone();
+    info!(logger, "spawning metrics");
+
     thread::spawn(move || {
         metrics::run_metrics(metrics);
     });
-    info!(logger, "Listening on: {}", socket.local_addr()?); // TODO: set up the option for kernel timestamping
-    loop {
-        let mut buf = [0; BUF_SIZE];
 
-        let (amt, src) = socket.recv_from(&mut buf)?;
-        let ts = SystemTime::now();
-
-        let buf = &mut buf[..amt];
-        let resp = response(buf, ts, keys.clone(), servstate, logger.clone(), src);
-        match resp {
-            Ok(data) => {
-                let resp = socket.send_to(&data, &src);
-                if let Err(err) = resp {
-                    error!(logger, "error sending response: {:}", err; "client" => src);
-                }
-            }
-            Err(_) => {
-                MANGLED_PACKET_COUNTER.inc(); // The packet is too mangled to do much with.
-                error!(logger, "mangled packet"; "client"=>src);
-            }
-        };
+    let wg = WaitGroup::new();
+    for addr in parsed_config.addrs {
+        let addr = addr.to_socket_addrs().unwrap().next().unwrap();
+        let socket = UdpSocket::bind(&addr)?;
+        let wg = wg.clone();
+        let logger = logger.new(slog::o!("listen_addr"=>addr));
+        let keys = keys.clone();
+        info!(logger, "Listening on: {}", socket.local_addr()?); // TODO: set up the option for kernel timestamping
+        thread::spawn(move || {
+            run_server(socket, keys, &servstate, logger);
+            drop(wg);
+        });
     }
+    wg.wait();
+    Ok(())
 }
 
 fn response(
     query: &[u8],
     time: SystemTime,
     cookie_keys: Arc<RwLock<RotatingKeys>>,
-    servstate: ServerState,
+    servstate: &ServerState,
     logger: slog::Logger,
     src: SocketAddr,
 ) -> Result<Vec<u8>, std::io::Error> {

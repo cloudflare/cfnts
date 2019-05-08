@@ -19,7 +19,7 @@ pub struct ConfigNTSKE {
     pub tls_certs: Vec<Certificate>,
     pub tls_keys: Vec<PrivateKey>,
     pub cookie_key: Vec<u8>,
-    pub addr: String,
+    pub addrs: Vec<String>,
     pub next_port: u16,
     pub memcached_url: String,
     pub metrics: MetricsConfig,
@@ -27,7 +27,7 @@ pub struct ConfigNTSKE {
 
 #[derive(Debug)]
 pub struct ConfigNTP {
-    pub addr: String,
+    pub addrs: Vec<String>,
     pub cookie_key: Vec<u8>,
     pub memcached_url: String,
     pub metrics: MetricsConfig,
@@ -53,6 +53,14 @@ fn load_cookie_key(path: String) -> Vec<u8> {
     fs::read(path).expect("Unable to read file")
 }
 
+fn to_string(v1: Vec<config::Value>) -> Vec<String> {
+    let mut ret = vec![];
+    for val in v1 {
+        ret.push(val.into_str().unwrap());
+    }
+    ret
+}
+
 pub fn parse_nts_ke_config(config_filename: &str) -> ConfigNTSKE {
     let mut settings = Config::default();
     settings
@@ -70,7 +78,7 @@ pub fn parse_nts_ke_config(config_filename: &str) -> ConfigNTSKE {
         tls_keys: load_tls_keys(tls_key_filename),
         cookie_key: load_cookie_key(cookie_key_filename),
         memcached_url: settings.get_str("memc_url").unwrap_or("".to_string()),
-        addr: settings.get_str("addr").unwrap(),
+        addrs: to_string(settings.get_array("addr").unwrap()),
         next_port: settings.get_int("next_port").unwrap() as u16,
         metrics: MetricsConfig {
             port: settings.get_int("metrics_port").unwrap() as u16,
@@ -92,7 +100,7 @@ pub fn parse_ntp_config(config_filename: &str) -> ConfigNTP {
 
     let config = ConfigNTP {
         cookie_key: load_cookie_key(cookie_key_filename),
-        addr: settings.get_str("addr").unwrap(),
+        addrs: to_string(settings.get_array("addr").unwrap()),
         memcached_url: settings.get_str("memc_url").unwrap_or("".to_string()),
         metrics: MetricsConfig {
             port: settings.get_int("metrics_port").unwrap() as u16,

@@ -7,11 +7,13 @@ use std::collections::HashMap;
 use std::io;
 use std::io::{Cursor, ErrorKind, Read, Write};
 use std::net::ToSocketAddrs;
+use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time;
 use std::vec::Vec;
 
+use crossbeam::sync::WaitGroup;
 extern crate mio;
 use mio::tcp::{Shutdown, TcpListener, TcpStream};
 
@@ -93,6 +95,7 @@ struct NTSKeyServer {
     next_port: u16,
     listen_addr: std::net::SocketAddr,
     logger: slog::Logger,
+    poll: mio::Poll,
 }
 
 impl NTSKeyServer {
@@ -103,8 +106,15 @@ impl NTSKeyServer {
         next_port: u16,
         listen_addr: std::net::SocketAddr,
         logger: slog::Logger,
-    ) -> NTSKeyServer {
-        NTSKeyServer {
+    ) -> Result<NTSKeyServer, io::Error> {
+        let mut poll = mio::Poll::new()?;
+        poll.register(
+            &server,
+            LISTENER,
+            mio::Ready::readable(),
+            mio::PollOpt::level(),
+        );
+        Ok(NTSKeyServer {
             server,
             connections: HashMap::new(),
             next_id: 2,
@@ -113,10 +123,33 @@ impl NTSKeyServer {
             next_port: next_port,
             listen_addr: listen_addr,
             logger: logger,
+            poll: poll,
+        })
+    }
+
+    fn listen_and_serve(&mut self) {
+        let mut events = mio::Events::with_capacity(2048);
+
+        loop {
+            self.poll.poll(&mut events, None).unwrap();
+
+            for event in events.iter() {
+                match event.token() {
+                    LISTENER => match self.accept() {
+                        Err(err) => {
+                            ERROR_COUNTER.inc();
+                            error!(self.logger, "Accept failed unrecoverably");
+                        }
+
+                        Ok(_) => {}
+                    },
+                    _ => self.conn_event(&event),
+                }
+            }
         }
     }
 
-    fn accept(&mut self, poll: &mut mio::Poll) -> Result<(), std::io::Error> {
+    fn accept(&mut self) -> Result<(), std::io::Error> {
         match self.server.accept() {
             Ok((socket, addr)) => {
                 info!(self.logger, "Accepting new connection from {:?}", addr);
@@ -143,7 +176,7 @@ impl NTSKeyServer {
                         next_logger,
                     ),
                 );
-                self.connections[&token].register(poll);
+                self.connections[&token].register(&mut self.poll);
                 Ok(())
             }
             Err(e) => {
@@ -154,13 +187,14 @@ impl NTSKeyServer {
                         "encountered error while accepting connection; err={:?}", e
                     );
                     self.server = TcpListener::bind(&self.listen_addr)?;
-                    poll.register(
-                        &self.server,
-                        LISTENER,
-                        mio::Ready::readable(),
-                        mio::PollOpt::level(),
-                    )
-                    .map({ |_| () })
+                    self.poll
+                        .register(
+                            &self.server,
+                            LISTENER,
+                            mio::Ready::readable(),
+                            mio::PollOpt::level(),
+                        )
+                        .map({ |_| () })
                 } else {
                     Ok(())
                 }
@@ -168,11 +202,14 @@ impl NTSKeyServer {
         }
     }
 
-    fn conn_event(&mut self, poll: &mut mio::Poll, event: &mio::Event) {
+    fn conn_event(&mut self, event: &mio::Event) {
         let token = event.token();
 
         if self.connections.contains_key(&token) {
-            self.connections.get_mut(&token).unwrap().ready(poll, event);
+            self.connections
+                .get_mut(&token)
+                .unwrap()
+                .ready(&mut self.poll, event);
 
             if self.connections[&token].is_closed() {
                 self.connections.remove(&token);
@@ -396,41 +433,28 @@ pub fn start_nts_ke_server(
         .expect("invalid key or certificate");
     server_config.set_protocols(&[alpn_bytes]);
     let conf = Arc::new(server_config);
-    let addr = parsed_config
-        .addr
-        .to_socket_addrs()
-        .unwrap()
-        .next()
-        .unwrap();
+    let wg = WaitGroup::new();
+    for addr in parsed_config.addrs {
+        let addr = addr.to_socket_addrs().unwrap().next().unwrap();
 
-    let listener = TcpListener::bind(&addr).unwrap();
-
-    let mut poll = mio::Poll::new().unwrap();
-    poll.register(
-        &listener,
-        LISTENER,
-        mio::Ready::readable(),
-        mio::PollOpt::level(),
-    )
-    .unwrap();
-    let mut tlsserv = NTSKeyServer::new(listener, conf, keys.clone(), port, addr, logger.clone());
-    let mut events = mio::Events::with_capacity(2048);
-    info!(logger, "Starting NTS-KE server over TCP/TLS on {:?}", addr);
-    loop {
-        poll.poll(&mut events, None).unwrap();
-
-        for event in events.iter() {
-            match event.token() {
-                LISTENER => match tlsserv.accept(&mut poll) {
-                    Err(err) => {
-                        ERROR_COUNTER.inc();
-                        error!(logger, "Accept failed unrecoverably");
-                    }
-
-                    Ok(_) => {}
-                },
-                _ => tlsserv.conn_event(&mut poll, &event),
-            }
-        }
+        let listener = TcpListener::bind(&addr)?;
+        // We actually want multiple listeners, probably will want to use multiple polls.
+        let mut tlsserv = NTSKeyServer::new(
+            listener,
+            conf.clone(),
+            keys.clone(),
+            port,
+            addr,
+            logger.clone(),
+        )?;
+        info!(logger, "Starting NTS-KE server over TCP/TLS on {:?}", addr);
+        let wg = wg.clone();
+        thread::spawn(move || {
+            tlsserv.listen_and_serve();
+            drop(wg);
+        });
     }
+
+    wg.wait();
+    Ok(())
 }

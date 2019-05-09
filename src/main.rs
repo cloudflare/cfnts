@@ -34,6 +34,12 @@ fn app() -> App<'static, 'static> {
         .about("cloudflare's NTS implementation.")
         .version("v0.1")
         // .subcommand_required_else_help(true) TODO: this seems to be very broken in the clap crate.
+        .arg(
+            Arg::with_name("DEBUG")
+                .short("d")
+                .long("debug")
+                .help("turns on debug logging"),
+        )
         .subcommands(vec![
             SubCommand::with_name("nts-ke")
                 .about("Runs NTS-KE server over TLS/TCP")
@@ -48,14 +54,18 @@ fn app() -> App<'static, 'static> {
 }
 
 fn main() {
+    let matches = app().get_matches();
     let mut builder = TerminalLoggerBuilder::new();
-    builder.level(Severity::Debug);
+    builder.level(Severity::Info);
     builder.destination(Destination::Stderr);
+
+    if matches.is_present("DEBUG") {
+        builder.level(Severity::Debug);
+    }
 
     let logger = builder.build().unwrap();
     slog_stdlog::init();
     let _guard = slog_scope::set_global_logger(logger.clone());
-    let matches = app().get_matches();
 
     // TODO: remove this if statement when .subcommand_required_else_help(true) works.
     if let None = matches.subcommand {

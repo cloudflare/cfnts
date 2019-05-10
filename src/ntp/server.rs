@@ -22,6 +22,9 @@ use crossbeam::sync::WaitGroup;
 /// Miscreant calls Aes128SivAead what IANA calls AEAD_AES_SIV_CMAC_256
 use miscreant::aead::Aead;
 use miscreant::aead::Aes128SivAead;
+use nix::sys::socket::{recvmsg, sendto, setsockopt, sockopt, CmsgSpace, ControlMessage, MsgFlags};
+use nix::sys::time::TimeVal;
+use nix::sys::uio::IoVec;
 
 use super::protocol;
 use super::protocol::{
@@ -94,31 +97,65 @@ fn run_server(
     servstate: Arc<RwLock<ServerState>>,
     logger: slog::Logger,
 ) -> Result<(), std::io::Error> {
+    let sockfd = socket.as_raw_fd();
+    setsockopt(sockfd, sockopt::ReceiveTimestamp, &true).unwrap();
+    // The following is adapted from the example in the nix crate docs:
+    // https://docs.rs/nix/0.13.0/nix/sys/socket/enum.ControlMessage.html#variant.ScmTimestamp
+    // Most of these functions are documented in manpages, and nix is a thin wrapper around them.
     loop {
+        // Receive and respond to packets
         let mut buf = [0; BUF_SIZE];
+        let mut flags = MsgFlags::empty();
+        let mut cmsgspace: CmsgSpace<TimeVal> = CmsgSpace::new();
+        let iov = [IoVec::from_mut_slice(&mut buf)];
+        let r = recvmsg(sockfd, &iov, Some(&mut cmsgspace), flags);
+        if let Err(err) = r {
+            error!(logger, "error receiving message");
+            continue;
+        }
+        let r = r.unwrap(); // this is safe because of previous if
+        if let None = r.address {
+            // No return address => we can't do anything
+            continue;
+        }
+        let src = r.address.unwrap();
+        // We should only have a single cmsg of known type.
+        // The nix crate implements a typesafe interface to cmsg,
+        // hence some of the matching here.
+        let r_time = match r.cmsgs().next() {
+            Some(ControlMessage::ScmTimestamp(&r_time)) => r_time,
+            Some(_) => {
+                error!(logger, "unexpected control message");
+                continue;
+            }
+            None => {
+                error!(logger, "no control message");
+                continue;
+            }
+        };
 
-        let (amt, src) = socket.recv_from(&mut buf)?;
-        let ts = SystemTime::now();
-
-        let buf = &mut buf[..amt];
+        let r_system = SystemTime::UNIX_EPOCH
+            + Duration::new(r_time.tv_sec() as u64, r_time.tv_usec() as u32 * 1000);
+        let t_system = SystemTime::now();
+        // We now have the receive times and the current time as SystemTimes
         let resp = response(
-            buf,
-            ts,
+            &buf[..r.bytes],
+            r_system,
+            t_system,
             keys.clone(),
             servstate.clone(),
             logger.clone(),
-            src,
         );
         match resp {
             Ok(data) => {
-                let resp = socket.send_to(&data, &src);
+                let resp = sendto(sockfd, &data, &src, flags);
                 if let Err(err) = resp {
-                    error!(logger, "error sending response: {:}", err; "client" => src);
+                    error!(logger, "error sending response: {:}", err);
                 }
             }
             Err(_) => {
                 MANGLED_PACKET_COUNTER.inc(); // The packet is too mangled to do much with.
-                error!(logger, "mangled packet"; "client"=>src);
+                error!(logger, "mangled packet");
             }
         };
     }
@@ -190,7 +227,6 @@ pub fn start_ntp_server(
             (*state_guard).stratum = 1;
         }
     }
-
     let metrics = parsed_config.metrics.clone();
     info!(logger, "spawning metrics");
 
@@ -234,20 +270,26 @@ fn fix_dispersion(disp: u32, now: SystemTime, taken: SystemTime) -> u32 {
     }
 }
 
-fn create_header(
-    query_packet: &NtpPacket,
-    received: SystemTime,
-    servstate: Arc<RwLock<ServerState>>,
-) -> NtpPacketHeader {
-    let servstate = servstate.read().unwrap();
-    let unix_time = received.duration_since(SystemTime::UNIX_EPOCH).unwrap(); // Safe absent time machines
+fn ntp_timestamp(time: SystemTime) -> u64 {
+    let unix_time = time.duration_since(SystemTime::UNIX_EPOCH).unwrap(); // Safe absent time machines
     let unix_offset = Duration::new(UNIX_OFFSET, 0);
     let epoch_time = unix_offset + unix_time;
     let ts_secs = epoch_time.as_secs();
     let ts_nanos = epoch_time.subsec_nanos() as f64;
     let ts_frac = ((ts_nanos * TWO_POW_32) / 1.0e9).round() as u32;
     // RFC 5905  Figure 3
-    let response_timestamp = (ts_secs << 32) + ts_frac as u64;
+    (ts_secs << 32) + ts_frac as u64
+}
+
+fn create_header(
+    query_packet: &NtpPacket,
+    received: SystemTime,
+    transmit: SystemTime,
+    servstate: Arc<RwLock<ServerState>>,
+) -> NtpPacketHeader {
+    let servstate = servstate.read().unwrap();
+    let receive_timestamp = ntp_timestamp(received);
+    let transmit_timestamp = ntp_timestamp(transmit);
     NtpPacketHeader {
         leap_indicator: servstate.leap,
         version: servstate.version,
@@ -256,25 +298,25 @@ fn create_header(
         precision: servstate.precision,
         stratum: servstate.stratum,
         root_delay: servstate.root_delay,
-        root_dispersion: fix_dispersion(servstate.root_dispersion, received, servstate.taken),
+        root_dispersion: fix_dispersion(servstate.root_dispersion, transmit, servstate.taken),
         reference_id: servstate.refid,
         reference_timestamp: servstate.refstamp,
         origin_timestamp: query_packet.header.transmit_timestamp,
-        receive_timestamp: response_timestamp,
-        transmit_timestamp: response_timestamp,
+        receive_timestamp: receive_timestamp,
+        transmit_timestamp: transmit_timestamp,
     }
 }
 
 fn response(
     query: &[u8],
-    time: SystemTime,
+    r_time: SystemTime,
+    t_time: SystemTime,
     cookie_keys: Arc<RwLock<RotatingKeys>>,
     servstate: Arc<RwLock<ServerState>>,
     logger: slog::Logger,
-    src: SocketAddr,
 ) -> Result<Vec<u8>, std::io::Error> {
-    let query_packet = parse_ntp_packet(query)?; // We should attempt a KOD in response to a mangled packet
-    let resp_header = create_header(&query_packet, time, servstate);
+    let query_packet = parse_ntp_packet(query)?; // Should try to send a KOD if this happens
+    let resp_header = create_header(&query_packet, r_time, t_time, servstate);
 
     QUERY_COUNTER.inc();
 
@@ -301,21 +343,21 @@ fn response(
                             )),
                             None => {
                                 UNDECRYPTABLE_COOKIE_COUNTER.inc();
-                                error!(logger, "undecryptable cookie with keyid {:x?}", keyid; "client" => src);
+                                error!(logger, "undecryptable cookie with keyid {:x?}", keyid);
                                 send_kiss_of_death(query_packet)
                             }
                         }
                     }
                     None => {
                         MISSING_KEY_COUNTER.inc();
-                        error!(logger, "cannot access key {:x?}", keyid; "client" => src);
+                        error!(logger, "cannot access key {:x?}", keyid);
                         send_kiss_of_death(query_packet)
                     }
                 }
             }
             None => {
                 MALFORMED_COOKIE_COUNTER.inc();
-                error!(logger, "malformed cookie"; "client"=>src);
+                error!(logger, "malformed cookie");
                 send_kiss_of_death(query_packet)
             }
         }

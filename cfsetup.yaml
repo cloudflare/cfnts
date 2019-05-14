@@ -13,6 +13,13 @@ all: &all
       - pkg-config
       - cargo-deb
     post-cache:
+      - make cf-package
+  build-compose:
+    builddeps:
+      - rust=1.31.0-1
+      - cargo-to-teamcity
+      - pkg-config
+    post-cache:
       - cargo build | cargo-to-teamcity
   compose:
     files:

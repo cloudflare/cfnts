@@ -89,7 +89,7 @@ pub fn start_ntp_server(
         forward_periods: 2,
         backward_periods: 24,
         master_key: parsed_config.cookie_key,
-        latest: [0; 8],
+        latest: [0; 4],
         keys: HashMap::new(),
         logger: logger.clone(),
     };

@@ -24,7 +24,7 @@ lazy_static! {
     )
     .unwrap();
 }
-pub type KeyID = [u8; 8];
+pub type KeyID = [u8; 4];
 
 pub struct RotatingKeys {
     pub memcache_url: String,
@@ -38,12 +38,15 @@ pub struct RotatingKeys {
     pub logger: slog::Logger,
 }
 
-/// This function writes a i64 as 8 bytes in big endian.
-fn be_bytes(n: i64) -> [u8; 8] {
-    let mut ret: [u8; 8] = [0; 8];
-    let mut u = n as u64;
-    for i in 0..7 {
-        ret[7 - i] = u as u8;
+/// This function writes a i64 as 4 bytes in big endian.
+/// Since we are using timestamps we are fine with 4 bytes.
+/// Rollover doesn't matter here since we don't have 38 years worth
+/// of cookies.
+fn be_bytes(n: i64) -> [u8; 4] {
+    let mut ret: [u8; 4] = [0; 4];
+    let mut u = n as u32;
+    for i in 0..3 {
+        ret[3 - i] = u as u8;
         u = u >> 8;
     }
     ret
@@ -182,7 +185,7 @@ mod test {
             forward_periods: 1,
             backward_periods: 1,
             master_key: vec![0, 32],
-            latest: [1, 2, 3, 4, 5, 6, 7, 8],
+            latest: [1, 2, 3, 4],
             keys: HashMap::new(),
             logger: NullLoggerBuilder.build().unwrap(),
         };

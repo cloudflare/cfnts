@@ -1,5 +1,6 @@
 use crate::config::parse_ntp_config;
 
+use crate::cfsock;
 use crate::cookie::{eat_cookie, get_keyid, make_cookie, NTSKeys, COOKIE_SIZE};
 use crate::metrics;
 use crate::rotation::{periodic_rotate, RotatingKeys};
@@ -11,19 +12,27 @@ use slog::{debug, error, info, trace, warn};
 
 use std::collections::HashMap;
 use std::io::{Cursor, Error, ErrorKind};
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{
+    SocketAddr,
+    SocketAddr::{V4, V6},
+    ToSocketAddrs, UdpSocket,
+};
 use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time;
 use std::time::{Duration, SystemTime};
+use std::vec;
 
 use crossbeam::sync::WaitGroup;
+use libc::{in6_pktinfo, in_pktinfo};
 /// Miscreant calls Aes128SivAead what IANA calls AEAD_AES_SIV_CMAC_256
 use miscreant::aead::Aead;
 use miscreant::aead::Aes128SivAead;
-use nix::sys::socket::{recvmsg, sendto, setsockopt, sockopt, CmsgSpace, ControlMessage, MsgFlags};
-use nix::sys::time::TimeVal;
+use nix::sys::socket::{
+    recvmsg, sendmsg, setsockopt, sockopt, CmsgSpace, ControlMessage, MsgFlags, SetSockOpt,
+};
+use nix::sys::time::{TimeVal, TimeValLike};
 use nix::sys::uio::IoVec;
 
 use super::protocol;
@@ -91,14 +100,22 @@ struct ServerState {
     taken: SystemTime,
 }
 
+/// run_server runs the ntp server on the given socket.
+/// The caller has to set up the socket options correctly
 fn run_server(
     socket: UdpSocket,
     keys: Arc<RwLock<RotatingKeys>>,
     servstate: Arc<RwLock<ServerState>>,
     logger: slog::Logger,
+    ipv4: bool,
 ) -> Result<(), std::io::Error> {
     let sockfd = socket.as_raw_fd();
-    setsockopt(sockfd, sockopt::ReceiveTimestamp, &true).unwrap();
+    setsockopt(sockfd, sockopt::ReceiveTimestamp, &true);
+    if ipv4 {
+        setsockopt(sockfd, sockopt::Ipv4PacketInfo, &true);
+    } else {
+        setsockopt(sockfd, sockopt::Ipv6RecvPacketInfo, &true);
+    }
     // The following is adapted from the example in the nix crate docs:
     // https://docs.rs/nix/0.13.0/nix/sys/socket/enum.ControlMessage.html#variant.ScmTimestamp
     // Most of these functions are documented in manpages, and nix is a thin wrapper around them.
@@ -106,7 +123,8 @@ fn run_server(
         // Receive and respond to packets
         let mut buf = [0; BUF_SIZE];
         let mut flags = MsgFlags::empty();
-        let mut cmsgspace: CmsgSpace<TimeVal> = CmsgSpace::new();
+        let mut cmsgspace: CmsgSpace<(TimeVal, CmsgSpace<(in_pktinfo, CmsgSpace<in6_pktinfo>)>)> =
+            CmsgSpace::new();
         let iov = [IoVec::from_mut_slice(&mut buf)];
         let r = recvmsg(sockfd, &iov, Some(&mut cmsgspace), flags);
         if let Err(err) = r {
@@ -122,17 +140,33 @@ fn run_server(
         // We should only have a single cmsg of known type.
         // The nix crate implements a typesafe interface to cmsg,
         // hence some of the matching here.
-        let r_time = match r.cmsgs().next() {
-            Some(ControlMessage::ScmTimestamp(&r_time)) => r_time,
-            Some(_) => {
-                error!(logger, "unexpected control message");
-                continue;
+        let mut r_time = TimeVal::nanoseconds(0);
+        let mut msgs: Vec<ControlMessage> = Vec::new();
+        for msg in r.cmsgs() {
+            match msg {
+                ControlMessage::ScmTimestamp(&r_timestamp) => r_time = r_timestamp,
+                ControlMessage::Ipv4PacketInfo(inf) => {
+                    if ipv4 {
+                        msgs.push(msg);
+                    } else {
+                        error!(logger, "v6 connection got v4 info");
+                        continue;
+                    }
+                }
+                ControlMessage::Ipv6PacketInfo(inf) => {
+                    if !ipv4 {
+                        msgs.push(msg);
+                    } else {
+                        error!(logger, "v4 connection got v6 info");
+                        continue;
+                    }
+                }
+                _ => {
+                    error!(logger, "unexpected control message");
+                    continue;
+                }
             }
-            None => {
-                error!(logger, "no control message");
-                continue;
-            }
-        };
+        }
 
         let r_system = SystemTime::UNIX_EPOCH
             + Duration::new(r_time.tv_sec() as u64, r_time.tv_usec() as u32 * 1000);
@@ -148,7 +182,13 @@ fn run_server(
         );
         match resp {
             Ok(data) => {
-                let resp = sendto(sockfd, &data, &src, flags);
+                let resp = sendmsg(
+                    sockfd,
+                    &[IoVec::from_slice(&data)],
+                    &msgs,
+                    flags,
+                    Some(&src),
+                );
                 if let Err(err) = resp {
                     error!(logger, "error sending response: {:}", err);
                 }
@@ -237,16 +277,26 @@ pub fn start_ntp_server(
     let wg = WaitGroup::new();
     for addr in parsed_config.addrs {
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
-        let socket = UdpSocket::bind(&addr)?;
+        let socket = cfsock::udp_listen(&addr)?;
         let wg = wg.clone();
         let logger = logger.new(slog::o!("listen_addr"=>addr));
         let keys = keys.clone();
         let servstate = servstate.clone();
-        info!(logger, "Listening on: {}", socket.local_addr()?); // TODO: set up the option for kernel timestamping
-        thread::spawn(move || {
-            run_server(socket, keys, servstate, logger);
-            drop(wg);
-        });
+        info!(logger, "Listening on: {}", socket.local_addr()?);
+        match addr {
+            V4(_) => {
+                thread::spawn(move || {
+                    run_server(socket, keys, servstate, logger, true);
+                    drop(wg);
+                });
+            }
+            V6(_) => {
+                thread::spawn(move || {
+                    run_server(socket, keys, servstate, logger, false);
+                    drop(wg);
+                });
+            }
+        }
     }
     wg.wait();
     Ok(())

@@ -40,6 +40,7 @@ pub struct ConfigNTSClient {
     pub host: String,
     pub port: u16,
     pub trusted_cert: Option<Certificate>,
+    pub use_ipv6: Option<bool>,
 }
 
 fn load_tls_certs(path: String) -> Vec<Certificate> {
@@ -136,6 +137,10 @@ pub fn parse_nts_client_config(config_filename: &str) -> ConfigNTSClient {
         trusted_cert: match settings.get_str("trusted_certificate") {
             Err(_) => None,
             Ok(file) => Some(load_tls_certs(file)[0].clone()),
+        },
+        use_ipv6: match settings.get_bool("use_ipv6") {
+            Err(_) => None,
+            Ok(res) => Some(res),
         },
     };
     config

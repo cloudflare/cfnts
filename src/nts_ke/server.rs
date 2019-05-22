@@ -24,6 +24,7 @@ use nix::unistd;
 use nix::unistd::pipe;
 use rustls::{NoClientAuth, ServerConfig, Session};
 
+use crate::cfsock;
 use crate::config::parse_nts_ke_config;
 use crate::config::ConfigNTSKE;
 use crate::cookie::{make_cookie, NTSKeys};
@@ -542,10 +543,9 @@ fn run_server_loop(
     let wg = WaitGroup::new();
     for addr in parsed_config.addrs {
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
-
-        let listener = TcpListener::bind(&addr)?;
+        let listener = cfsock::tcp_listener(&addr)?;
         let mut tlsserv = NTSKeyServer::new(
-            listener,
+            TcpListener::from_listener(listener, &addr)?,
             conf.clone(),
             keys.clone(),
             parsed_config.next_port,

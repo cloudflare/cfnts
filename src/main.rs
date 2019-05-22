@@ -5,6 +5,7 @@ extern crate prometheus;
 extern crate slog;
 extern crate sloggers;
 
+mod cfsock;
 mod config;
 mod cookie;
 mod metrics;

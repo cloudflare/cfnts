@@ -4,6 +4,7 @@ export RUST_BACKTRACE=1
 sleep 30
 ./target/debug/nts nts-client tests/nts-client.yaml > result.txt
 awk '{if ($2 != 1) exit 1}' < result.txt
+echo "running second client"
 ./target/debug/nts nts-client tests/nts-client-upper.yaml
 for i in {1..1000}
 do

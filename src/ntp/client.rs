@@ -34,7 +34,13 @@ pub fn run_nts_ntp_client(
     logger: &slog::Logger,
     state: NtsKeResult,
 ) -> Result<NtpResult, std::io::Error> {
-    let mut socket = UdpSocket::bind("0.0.0.0:0")?; // Address families make me sad
+    let mut socket: Option<UdpSocket> = None;
+    if let Some(true) = state.use_ipv6 {
+        socket = Some(UdpSocket::bind("[::]:0")?);
+    } else {
+        socket = Some(UdpSocket::bind("0.0.0.0:0")?);
+    }
+    let socket = socket.unwrap();
     let mut send_aead = Aes128SivAead::new(&state.keys.c2s);
     let mut recv_aead = Aes128SivAead::new(&state.keys.s2c);
     let header = NtpPacketHeader {

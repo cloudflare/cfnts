@@ -42,6 +42,7 @@ pub struct NtsKeResult {
     pub next_server: String,
     pub next_port: u16,
     pub keys: NTSKeys,
+    pub use_ipv6: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -215,5 +216,6 @@ pub fn run_nts_ke_client(
         next_server: state.next_server,
         next_port: state.next_port,
         keys: state.keys,
+        use_ipv6: parsed_config.use_ipv6,
     })
 }

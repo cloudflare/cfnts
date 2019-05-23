@@ -101,7 +101,7 @@ pub fn run_nts_ke_client(
     logger: &slog::Logger,
     config_file: String,
 ) -> Result<NtsKeResult, Box<dyn Error>> {
-    let parsed_config = config::parse_nts_client_config(&config_file);
+    let parsed_config = config::parse_nts_client_config(&config_file)?;
     let mut tls_config = rustls::ClientConfig::new();
     let alpn_proto = String::from("ntske/1");
     let alpn_bytes = alpn_proto.into_bytes();

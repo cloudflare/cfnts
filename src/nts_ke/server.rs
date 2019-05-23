@@ -487,8 +487,8 @@ pub fn start_nts_ke_server(
 ) -> Result<(), Box<std::error::Error>> {
     let logger = start_logger.new(slog::o!("component"=>"nts_ke"));
     // First parse config for TLS server using local config module.
-    let parsed_config = parse_nts_ke_config(config_filename);
-    // We need to initialize rotation
+    let parsed_config = parse_nts_ke_config(config_filename)?;
+    let port = parsed_config.next_port;
     let mut key_rot = RotatingKeys {
         memcache_url: parsed_config.memcached_url.clone(),
         prefix: "/nts/nts-keys".to_string(),

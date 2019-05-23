@@ -208,7 +208,7 @@ pub fn start_ntp_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let logger = logger.new(slog::o!("component"=>"ntp"));
     // First parse config for TLS server using local config module.
-    let parsed_config = parse_ntp_config(config_filename);
+    let parsed_config = parse_ntp_config(config_filename)?;
 
     let mut key_rot = RotatingKeys {
         memcache_url: parsed_config.memcached_url,

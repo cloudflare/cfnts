@@ -1,7 +1,9 @@
+use std::boxed::Box;
 use std::fs;
 use std::io::BufReader;
+use std::io::Error;
 
-use config::Config;
+use config::{Config, ConfigError};
 
 use rustls::{
     internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys},
@@ -43,17 +45,26 @@ pub struct ConfigNTSClient {
     pub use_ipv6: Option<bool>,
 }
 
-fn load_tls_certs(path: String) -> Vec<Certificate> {
-    certs(&mut BufReader::new(fs::File::open(path).unwrap())).unwrap()
+fn io_to_config(cause: std::io::Error) -> ConfigError {
+    ConfigError::Foreign(Box::new(cause))
 }
 
-fn load_tls_keys(path: String) -> Vec<PrivateKey> {
-    let res = pkcs8_private_keys(&mut BufReader::new(fs::File::open(path).unwrap()));
-    res.unwrap()
+fn load_tls_certs(path: String) -> Result<Vec<Certificate>, ConfigError> {
+    certs(&mut BufReader::new(
+        fs::File::open(&path).map_err(io_to_config)?,
+    ))
+    .map_err(|()| ConfigError::Message(format!("could not load certificate from {}", &path)))
 }
 
-fn load_cookie_key(path: String) -> Vec<u8> {
-    fs::read(path).expect("Unable to read file")
+fn load_tls_keys(path: String) -> Result<Vec<PrivateKey>, ConfigError> {
+    let res = pkcs8_private_keys(&mut BufReader::new(
+        fs::File::open(&path).map_err(io_to_config)?,
+    ));
+    res.map_err(|()| ConfigError::Message(format!("could not read pkcs8 private key {}", &path)))
+}
+
+fn load_cookie_key(path: String) -> Result<Vec<u8>, ConfigError> {
+    fs::read(path).map_err(io_to_config)
 }
 
 fn to_string(v1: Vec<config::Value>) -> Vec<String> {
@@ -64,38 +75,36 @@ fn to_string(v1: Vec<config::Value>) -> Vec<String> {
     ret
 }
 
-pub fn parse_nts_ke_config(config_filename: &str) -> ConfigNTSKE {
+pub fn parse_nts_ke_config(config_filename: &str) -> Result<ConfigNTSKE, config::ConfigError> {
     let mut settings = Config::default();
-    settings
-        .merge(config::File::with_name(config_filename))
-        .unwrap();
+    settings.merge(config::File::with_name(config_filename))?;
 
     // All config filenames MUST be given with relative paths to where the server is run.
     // Or else cf-nts will try to open the file while in the incorrect directory.
-    let tls_cert_filename = settings.get_str("tls_cert_file").unwrap();
-    let tls_key_filename = settings.get_str("tls_key_file").unwrap();
-    let cookie_key_filename = settings.get_str("cookie_key_file").unwrap();
+    let tls_cert_filename = settings.get_str("tls_cert_file")?;
+    let tls_key_filename = settings.get_str("tls_key_file")?;
+    let cookie_key_filename = settings.get_str("cookie_key_file")?;
 
     let config = ConfigNTSKE {
-        tls_certs: load_tls_certs(tls_cert_filename),
-        tls_keys: load_tls_keys(tls_key_filename),
-        cookie_key: load_cookie_key(cookie_key_filename),
+        tls_certs: load_tls_certs(tls_cert_filename)?,
+        tls_keys: load_tls_keys(tls_key_filename)?,
+        cookie_key: load_cookie_key(cookie_key_filename)?,
         memcached_url: settings.get_str("memc_url").unwrap_or("".to_string()),
-        addrs: to_string(settings.get_array("addr").unwrap()),
-        next_port: settings.get_int("next_port").unwrap() as u16,
+        addrs: settings.get_array("addr").map(to_string)?,
+        next_port: settings.get_int("next_port")? as u16,
         conn_timeout: match settings.get_int("conn_timeout") {
             Err(_) => None,
             Ok(val) => Some(val as u64),
         },
         metrics: MetricsConfig {
-            port: settings.get_int("metrics_port").unwrap() as u16,
-            addr: settings.get_str("metrics_addr").unwrap(),
+            port: settings.get_int("metrics_port")? as u16,
+            addr: settings.get_str("metrics_addr")?,
         },
     };
-    config
+    Ok(config)
 }
 
-pub fn parse_ntp_config(config_filename: &str) -> ConfigNTP {
+pub fn parse_ntp_config(config_filename: &str) -> Result<ConfigNTP, ConfigError> {
     let mut settings = Config::default();
     settings
         .merge(config::File::with_name(config_filename))
@@ -106,12 +115,12 @@ pub fn parse_ntp_config(config_filename: &str) -> ConfigNTP {
     let cookie_key_filename = settings.get_str("cookie_key_file").unwrap();
 
     let config = ConfigNTP {
-        cookie_key: load_cookie_key(cookie_key_filename),
-        addrs: to_string(settings.get_array("addr").unwrap()),
+        cookie_key: load_cookie_key(cookie_key_filename)?,
+        addrs: settings.get_array("addr").map(to_string)?,
         memcached_url: settings.get_str("memc_url").unwrap_or("".to_string()),
         metrics: MetricsConfig {
-            port: settings.get_int("metrics_port").unwrap() as u16,
-            addr: settings.get_str("metrics_addr").unwrap(),
+            port: settings.get_int("metrics_port")? as u16,
+            addr: settings.get_str("metrics_addr")?,
         },
         upstream_addr: {
             match settings.get_str("upstream_host") {
@@ -123,25 +132,23 @@ pub fn parse_ntp_config(config_filename: &str) -> ConfigNTP {
             }
         },
     };
-    config
+    Ok(config)
 }
 
-pub fn parse_nts_client_config(config_filename: &str) -> ConfigNTSClient {
+pub fn parse_nts_client_config(config_filename: &str) -> Result<ConfigNTSClient, ConfigError> {
     let mut settings = Config::default();
-    settings
-        .merge(config::File::with_name(config_filename))
-        .unwrap();
+    settings.merge(config::File::with_name(config_filename))?;
     let config = ConfigNTSClient {
-        host: settings.get_str("host").unwrap(),
-        port: settings.get_int("port").unwrap() as u16,
+        host: settings.get_str("host")?,
+        port: settings.get_int("port")? as u16,
         trusted_cert: match settings.get_str("trusted_certificate") {
             Err(_) => None,
-            Ok(file) => Some(load_tls_certs(file)[0].clone()),
+            Ok(file) => Some(load_tls_certs(file)?[0].clone()),
         },
         use_ipv6: match settings.get_bool("use_ipv6") {
             Err(_) => None,
             Ok(res) => Some(res),
         },
     };
-    config
+    Ok(config)
 }

@@ -15,6 +15,7 @@ use std::fmt;
 use std::io::Cursor;
 
 const CRIT_BIT: u16 = 0x8000;
+const HEADER_SIZE: usize = 4;
 
 #[derive(Clone, Copy, Debug)]
 pub enum NtsKeType {
@@ -120,8 +121,8 @@ pub fn deserialize_record(buff: &[u8]) -> Result<(Option<NtsKeRecord>, usize), D
         critical: false,
         record_type: EndOfMessage,
     };
-    if buff.len() < 4 {
-        return Err(TooShort(4));
+    if buff.len() < HEADER_SIZE {
+        return Err(TooShort(HEADER_SIZE));
     };
 
     let mut tmp_type = ((buff[0] as u16) << 8) + (buff[1] as u16); // Read a big endian u16 for the type
@@ -130,10 +131,10 @@ pub fn deserialize_record(buff: &[u8]) -> Result<(Option<NtsKeRecord>, usize), D
         tmp_type ^= CRIT_BIT;
     }
     let length: usize = ((buff[2] as usize) << 8) + (buff[3] as usize); // Read big endian u16 for length
-    if buff.len() < length {
-        return Err(TooShort(length));
+    if buff.len() < length + HEADER_SIZE {
+        return Err(TooShort(length + HEADER_SIZE));
     }
-    out.contents = buff[4..length + 4].to_vec(); // Rest of the packet
+    out.contents = buff[HEADER_SIZE..length + HEADER_SIZE].to_vec(); // Rest of the packet
     let unrecognized: bool;
     match record_type(tmp_type) {
         Some(rec) => {
@@ -148,9 +149,9 @@ pub fn deserialize_record(buff: &[u8]) -> Result<(Option<NtsKeRecord>, usize), D
         Err(UnrecognizedCriticalRecord)
     } else {
         if unrecognized {
-            Ok((None, length + 4))
+            Ok((None, length + HEADER_SIZE))
         } else {
-            Ok((Some(out), length + 4))
+            Ok((Some(out), length + HEADER_SIZE))
         }
     }
 }

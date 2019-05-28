@@ -3,17 +3,16 @@ use std::error;
 use std::error::Error;
 use std::fmt;
 use std::io::{stdout, Read, Write};
-use std::net::TcpStream;
+use std::net::{Shutdown, TcpStream};
 use std::sync::Arc;
 
 use rustls;
+use rustls::Session;
 use webpki;
 use webpki_roots;
 
 use super::protocol;
-use super::protocol::NtsKeRecord;
-use super::protocol::NtsKeType;
-use super::protocol::*;
+use super::protocol::{DeserializeError::TooShort, *};
 
 use self::ClientError::*;
 use crate::config;
@@ -122,7 +121,6 @@ pub fn run_nts_ke_client(
     info!(logger, "Connecting");
     let mut stream = TcpStream::connect((&parsed_config.host as &str, parsed_config.port)).unwrap();
     let mut tls_stream = rustls::Stream::new(&mut client, &mut stream);
-    let mut buf = Vec::new();
 
     let mut next_proto = NtsKeRecord {
         critical: true,
@@ -147,8 +145,7 @@ pub fn run_nts_ke_client(
     tls_stream.write(&protocol::serialize_record(&mut end_rec))?;
     tls_stream.flush()?;
     info!(logger, "Request transmitted");
-    let res = tls_stream.read_to_end(&mut buf); // They might not close it!
-    let keys = protocol::gen_key(&client).unwrap();
+    let keys = protocol::gen_key(tls_stream.sess).unwrap();
 
     let mut state = ClientState {
         finished: false,
@@ -160,30 +157,56 @@ pub fn run_nts_ke_client(
         aead_scheme: DEFAULT_SCHEME,
     };
 
-    debug!(logger, "Response returned of length: {:}", buf.len());
     let mut curr = 0;
-    while curr < buf.len() {
-        let rec = protocol::deserialize_record(&buf[curr..]);
-        match rec {
-            Ok((Some(rec), len)) => {
-                debug!(logger, "Record: {:?}", rec);
-                let status = process_record(rec, &mut state);
-                match status {
-                    Ok(_) => {}
-                    Err(err) => return Err(err),
+    let mut readptr = 0;
+    let mut buf = vec![0; 4]; // start with a header
+    while state.finished == false {
+        // We now read records from the server and process them.
+        // Buf contains all the data the server sent us. curr points at the last processed
+        // record, readptr points at the last read data.
+        let more = tls_stream.read(&mut buf[readptr..]);
+        if let Err(err) = more {
+            return Err(Box::new(err));
+        }
+        readptr += more.unwrap();
+        loop {
+            // We've read some data, let's see if we get further with it.
+            // This loop reads either 1 or 0 records each time.
+            // It's structured as a loop because reading from an empty buffer
+            // and reading from an insufficiently long buffer both work the same
+            // way. We have no promises enough was read.
+            let rec = protocol::deserialize_record(&buf[curr..]);
+            match rec {
+                Ok((Some(rec), len)) => {
+                    debug!(logger, "Record: {:?}", rec);
+                    let status = process_record(rec, &mut state);
+                    match status {
+                        Ok(_) => {}
+                        Err(err) => return Err(err),
+                    }
+                    curr += len;
                 }
-                curr += len;
-            }
-            Ok((None, len)) => {
-                debug!(logger, "Unknown record type");
-                curr += len;
-            }
-            Err(err) => {
-                debug!(logger, "error: {:?}", err);
-                return Err(Box::new(err));
+                Ok((None, len)) => {
+                    debug!(logger, "Unknown record type");
+                    curr += len;
+                }
+                Err(err) => match err {
+                    TooShort(n) => {
+                        debug!(logger, "minimum length {:}", n);
+                        buf.resize(curr + n, 0);
+                        // The buffer is now at least n bytes beyond curr.
+                        break;
+                    }
+                    _ => {
+                        debug!(logger, "error: {:?}", err);
+                        return Err(Box::new(err));
+                    }
+                },
             }
         }
     }
+    debug!(logger, "saw the end of the response");
+    stream.shutdown(Shutdown::Both);
 
     Ok(NtsKeResult {
         aead_scheme: state.aead_scheme,

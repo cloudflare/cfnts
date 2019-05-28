@@ -75,6 +75,7 @@ pub fn run_nts_ntp_client(
     info!(logger, "transmitting packet");
     let mut buff = [0; BUFF_SIZE];
     let (size, origin) = socket.recv_from(&mut buff)?;
+    info!(logger, "received packet");
     let recieved = parse_nts_packet::<Aes128SivAead>(&buff[0..size], &mut recv_aead);
     match recieved {
         Err(x) => Err(x),

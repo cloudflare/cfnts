@@ -106,7 +106,6 @@ pub fn run_nts_ke_client(
     let alpn_proto = String::from("ntske/1");
     let alpn_bytes = alpn_proto.into_bytes();
     tls_config.set_protocols(&[alpn_bytes]);
-    tls_config.versions = vec![rustls::ProtocolVersion::TLSv1_2]; // work around bug somewhere.
     match parsed_config.trusted_cert {
         Some(certs) => {
             info!(logger, "loading custom trust root");

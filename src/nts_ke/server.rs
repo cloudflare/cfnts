@@ -22,7 +22,7 @@ use mio::tcp::{Shutdown, TcpListener, TcpStream};
 use mio::unix::EventedFd;
 use nix::unistd;
 use nix::unistd::pipe;
-use rustls::{NoClientAuth, ServerConfig, Session};
+use rustls::{NoClientAuth, ProtocolVersion, ServerConfig, Session};
 
 use crate::cfsock;
 use crate::config::parse_nts_ke_config;
@@ -531,6 +531,7 @@ fn run_server_loop(
     keys: Arc<RwLock<RotatingKeys>>,
 ) -> Result<(), Box<std::error::Error>> {
     let mut server_config = ServerConfig::new(NoClientAuth::new());
+    server_config.versions = vec![ProtocolVersion::TLSv1_3];
     let alpn_proto = String::from("ntske/1");
     let alpn_bytes = alpn_proto.into_bytes();
     server_config

@@ -17,7 +17,7 @@ pub const UNIX_OFFSET: u64 = 2_208_988_800;
 pub const PHI: f64 = 15e-6;
 
 const HEADER_SIZE: u64 = 48;
-const NONCE_LEN: usize = 32;
+const NONCE_LEN: usize = 16;
 const EXT_TYPE_UNIQUE_IDENTIFIER: u16 = 0x0104;
 const EXT_TYPE_NTS_COOKIE: u16 = 0x0204;
 const EXT_TYPE_NTS_COOKIE_PLACEHOLDER: u16 = 0x0304;
@@ -376,7 +376,7 @@ pub fn serialize_nts_packet<T: Aead>(packet: NtsPacket, encryptor: &mut T) -> Ve
     let mut authent_buffer = Cursor::new(Vec::new());
     authent_buffer.write_u16::<BigEndian>(NONCE_LEN as u16); // length of the nonce
     authent_buffer.write_u16::<BigEndian>(ciphertext.len() as u16);
-    authent_buffer.write_all(&nonce); // 32 bytes so no padding
+    authent_buffer.write_all(&nonce); // 16 bytes so no padding
     authent_buffer.write_all(&ciphertext);
     let padlen = (4 - (ciphertext.len() % 4)) % 4;
     for i in 0..padlen {

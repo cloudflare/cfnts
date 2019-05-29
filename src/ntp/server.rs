@@ -371,7 +371,7 @@ fn response(
     QUERY_COUNTER.inc();
 
     if query_packet.header.mode != PacketMode::Client {
-        return send_kiss_of_death(query_packet);
+        return Err(Error::new(ErrorKind::InvalidData, "not client mode"));
     }
     if is_nts_packet(&query_packet) {
         NTS_COUNTER.inc();

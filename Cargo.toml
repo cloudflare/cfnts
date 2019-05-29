@@ -17,7 +17,7 @@ mio = "0.6.16"
 miscreant = "0.4.2"
 net2 = "0.2.33"
 nix = "0.13.0"
-prometheus = "0.5"
+prometheus = "0.5.0"
 rand = "0.6.5"
 ring = "0.14.6"
 rustls = "0.15.1"
@@ -31,6 +31,5 @@ webpki-roots = "0.16.0"
 
 [source.crates-io]
 replace-with = "vendored-sources"
-
 [source.vendored-sources]
 directory = "/Users/watsonladd/cf-repos/nts/vendor"

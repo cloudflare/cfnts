@@ -1,3 +1,9 @@
+2019.5.1
+- 2019-05-29 CRYPTO-1007: Do not respond to non client mode packets
+- 2019-05-29 CRYPTO-1006: Expose version in metrics
+- 2019-05-30 Fix makefile to make release
+- 2019-05-30 Bump version in Cargo.toml to release tag
+
 2019.5.0
 - 2019-02-26 Initial Commit
 - 2019-02-26 Functioning Server

@@ -1,6 +1,6 @@
 [package]
 name = "nts"
-version = "2019.5.0"
+version = "2019.5.1"
 authors = ["Watson Ladd <watson@cloudflare.com>", "Gabbi Fisher <gabbi@cloudflare.com>"]
 edition = "2018"
 

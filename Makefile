@@ -3,7 +3,7 @@ SHELL=/bin/bash
 TARGET_ARCHS ?= x86_64-unknown-linux-gnu
 
 release:
-	@git diff --quiet || {echo "Run in a clean repo"; exit 1}
+	@git diff --quiet || { echo "Run in a clean repo"; exit 1; }
 	cargo bump $(shell cfsetup release next-tag)
 	cargo update
 	git add Cargo.toml Cargo.lock

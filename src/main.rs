@@ -94,7 +94,10 @@ fn main() {
         let config_file = nts_client.value_of("config_file").unwrap();
         let res = run_nts_ke_client(&logger, config_file.to_string());
         match res {
-            Err(_) => process::exit(126),
+            Err(err) => {
+                eprintln!("failure of tls stage {:?}", err);
+                process::exit(125)
+            }
             Ok(_) => {}
         }
         let state = res.unwrap();
@@ -102,11 +105,10 @@ fn main() {
         let res = run_nts_ntp_client(&logger, state);
         match res {
             Err(err) => {
-                error!(logger, "Failure of client {:?}", err);
+                eprintln!("Failure of client {:?}", err);
                 process::exit(126)
             }
             Ok(result) => {
-                info!(logger, "Successful transaction");
                 println!("stratum: {:}", result.stratum);
                 process::exit(0)
             }

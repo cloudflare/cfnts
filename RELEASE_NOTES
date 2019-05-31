@@ -1,3 +1,7 @@
+2019.5.2
+- 2019-05-31 CRYPTO-1016: Test with chain, avoid races with logger
+- 2019-05-31 Bump version in Cargo.toml to release tag
+
 2019.5.1
 - 2019-05-29 CRYPTO-1007: Do not respond to non client mode packets
 - 2019-05-29 CRYPTO-1006: Expose version in metrics

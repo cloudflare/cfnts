@@ -2,10 +2,8 @@ use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use miscreant::aead::Aead;
 use rand::Rng;
 
-use std::boxed::Box;
 use std::io::{Cursor, Error, ErrorKind, Read, Write};
 use std::panic;
-use std::time::{Duration, SystemTime};
 
 use self::LeapState::*;
 use self::NtpExtensionType::*;
@@ -193,17 +191,28 @@ pub fn parse_packet_header(packet: &[u8]) -> Result<NtpPacketHeader, std::io::Er
 pub fn serialize_header(head: NtpPacketHeader) -> Vec<u8> {
     let mut buff = Cursor::new(Vec::new());
     let first = create_first(head.leap_indicator, head.version, head.mode);
-    buff.write_u8(first);
-    buff.write_u8(head.stratum);
-    buff.write_i8(head.poll);
-    buff.write_i8(head.precision);
-    buff.write_u32::<BigEndian>(head.root_delay);
-    buff.write_u32::<BigEndian>(head.root_dispersion);
-    buff.write_u32::<BigEndian>(head.reference_id);
-    buff.write_u64::<BigEndian>(head.reference_timestamp);
-    buff.write_u64::<BigEndian>(head.origin_timestamp);
-    buff.write_u64::<BigEndian>(head.receive_timestamp);
-    buff.write_u64::<BigEndian>(head.transmit_timestamp);
+    buff.write_u8(first)
+        .expect("write to buffer failed, unable to serialize NtpPacketHeader");
+    buff.write_u8(head.stratum)
+        .expect("write to buffer failed, unable to serialize NtpPacketHeader");
+    buff.write_i8(head.poll)
+        .expect("write to buffer failed, unable to serialize NtpPacketHeader");
+    buff.write_i8(head.precision)
+        .expect("write to buffer failed, unable to serialize NtpPacketHeader");
+    buff.write_u32::<BigEndian>(head.root_delay)
+        .expect("write to buffer failed, unable to serialize NtpPacketHeader");
+    buff.write_u32::<BigEndian>(head.root_dispersion)
+        .expect("write to buffer failed, unable to serialize NtpPacketHeader");
+    buff.write_u32::<BigEndian>(head.reference_id)
+        .expect("write to buffer failed, unable to serialize NtpPacketHeader");
+    buff.write_u64::<BigEndian>(head.reference_timestamp)
+        .expect("write to buffer failed, unable to serialize NtpPacketHeader");
+    buff.write_u64::<BigEndian>(head.origin_timestamp)
+        .expect("write to buffer failed, unable to serialize NtpPacketHeader");
+    buff.write_u64::<BigEndian>(head.receive_timestamp)
+        .expect("write to buffer failed, unable to serialize NtpPacketHeader");
+    buff.write_u64::<BigEndian>(head.transmit_timestamp)
+        .expect("write to buffer failed, unable to serialize NtpPacketHeader");
     buff.into_inner()
 }
 
@@ -247,8 +256,10 @@ fn parse_extensions(buff: &[u8]) -> Result<Vec<NtpExtension>, std::io::Error> {
 /// serialize_ntp_packet returns the packet in wire format.
 pub fn serialize_ntp_packet(pack: NtpPacket) -> Vec<u8> {
     let mut buff = Cursor::new(Vec::new());
-    buff.write_all(&serialize_header(pack.header));
-    buff.write_all(&serialize_extensions(pack.exts));
+    buff.write_all(&serialize_header(pack.header))
+        .expect("buffer write failed; can't serialize NtpPacket");
+    buff.write_all(&serialize_extensions(pack.exts))
+        .expect("buffer write failed; can't serialize NtpPacket");
     buff.into_inner()
 }
 
@@ -258,9 +269,12 @@ fn serialize_extensions(exts: Vec<NtpExtension>) -> Vec<u8> {
         if ext.contents.len() % 4 != 0 {
             panic!("extension is the wrong length")
         }
-        buff.write_u16::<BigEndian>(wire_type(ext.ext_type));
-        buff.write_u16::<BigEndian>((ext.contents.len() + 4) as u16); // The length includes the header
-        buff.write_all(&ext.contents);
+        buff.write_u16::<BigEndian>(wire_type(ext.ext_type))
+            .expect("buffer write failed; can't serialize Ntp Extensions");
+        buff.write_u16::<BigEndian>((ext.contents.len() + 4) as u16)
+            .expect("buffer write failed; can't serialize Ntp Extensions"); // The length includes the header
+        buff.write_all(&ext.contents)
+            .expect("buffer write failed; can't serialize Ntp Extensions");
     }
     buff.into_inner()
 }
@@ -308,7 +322,7 @@ pub fn parse_nts_packet<T: Aead>(
         match type_from_wire(ext_type) {
             NTSAuthenticator => {
                 let mut auth_ext_contents = vec![0; ext_len];
-                reader.read(&mut auth_ext_contents);
+                reader.read(&mut auth_ext_contents)?;
                 let oldpos = (reader.position() - 4 - (ext_len as u64)) as usize;
                 let enc_ext_data =
                     parse_decrypt_auth_ext::<T>(&buff[0..oldpos], &auth_ext_contents, decryptor)?;
@@ -321,7 +335,7 @@ pub fn parse_nts_packet<T: Aead>(
             }
             _ => {
                 let mut contents: Vec<u8> = vec![0; ext_len];
-                reader.read(&mut contents);
+                reader.read(&mut contents)?;
                 auth_exts.push(NtpExtension {
                     ext_type: type_from_wire(ext_type),
                     contents: contents,
@@ -366,28 +380,37 @@ fn parse_decrypt_auth_ext<T: Aead>(
 /// serialize_nts_packet serializes the packet and does all the encryption
 pub fn serialize_nts_packet<T: Aead>(packet: NtsPacket, encryptor: &mut T) -> Vec<u8> {
     let mut buff = Cursor::new(Vec::new());
-    buff.write_all(&serialize_header(packet.header));
-    buff.write_all(&serialize_extensions(packet.auth_exts));
+    buff.write_all(&serialize_header(packet.header))
+        .expect("Nts header could not be written, failed to serialize NtsPacket");
+    buff.write_all(&serialize_extensions(packet.auth_exts))
+        .expect("Nts extensions could not be written, failed to serialize NtsPacket");
     let plaintext = serialize_extensions(packet.auth_enc_exts);
     let mut nonce = [0; NONCE_LEN];
     rand::thread_rng().fill(&mut nonce);
     let ciphertext = encryptor.seal(&nonce, &buff.get_ref(), &plaintext);
 
     let mut authent_buffer = Cursor::new(Vec::new());
-    authent_buffer.write_u16::<BigEndian>(NONCE_LEN as u16); // length of the nonce
-    authent_buffer.write_u16::<BigEndian>(ciphertext.len() as u16);
-    authent_buffer.write_all(&nonce); // 16 bytes so no padding
-    authent_buffer.write_all(&ciphertext);
+    authent_buffer.write_u16::<BigEndian>(NONCE_LEN as u16)
+        .expect("Nonce length could not be written, failed to serialize NtsPacket"); // length of the nonce
+    authent_buffer.write_u16::<BigEndian>(ciphertext.len() as u16)
+        .expect("Ciphertext length could not be written, failed to serialize NtsPacket");
+    authent_buffer.write_all(&nonce)
+        .expect("Nonce could not be written, failed to serialize NtsPacket"); // 16 bytes so no padding
+    authent_buffer.write_all(&ciphertext)
+        .expect("Ciphertext could not be written, failed to serialize NtsPacket");
     let padlen = (4 - (ciphertext.len() % 4)) % 4;
-    for i in 0..padlen {
-        authent_buffer.write_u8(0); // pad with zeros: probably cleaner way exists
+    for _i in 0..padlen {
+        // pad with zeros: probably cleaner way exists
+        authent_buffer.write_u8(0)
+            .expect("Padding could not be written, failed to serialize NtsPacket");
     }
     let last_ext = NtpExtension {
         ext_type: NTSAuthenticator,
         contents: authent_buffer.into_inner(),
     };
     let res = serialize_extensions(vec![last_ext]);
-    buff.write_all(&res);
+    buff.write_all(&res)
+        .expect("Extensions could not be written, failed to serialize NtsPacket");
     buff.into_inner()
 }
 

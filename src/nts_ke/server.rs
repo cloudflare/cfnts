@@ -1,15 +1,15 @@
 use byteorder::{BigEndian, WriteBytesExt};
 use lazy_static::lazy_static;
-use prometheus::{opts, register_counter, register_int_counter, IntCounter, Opts};
-use slog::{debug, error, info, trace, warn};
+use prometheus::{opts, register_counter, register_int_counter, IntCounter};
+use slog::{debug, error, info};
 
 use std::cmp::{Ord, Ordering};
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::io;
-use std::io::{Cursor, ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::ToSocketAddrs;
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{RawFd};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time;
@@ -151,13 +151,13 @@ impl NTSKeyServer {
         logger: slog::Logger,
         timeout: u64,
     ) -> Result<NTSKeyServer, io::Error> {
-        let mut poll = mio::Poll::new()?;
+        let poll = mio::Poll::new()?;
         poll.register(
             &server,
             LISTENER,
             mio::Ready::readable(),
             mio::PollOpt::level(),
-        );
+        )?;
         // We will periodically write to a pipe to
         // trigger the cleanups.
         let (readend, writend) = pipe().unwrap();
@@ -166,8 +166,9 @@ impl NTSKeyServer {
             TIMER,
             mio::Ready::readable(),
             mio::PollOpt::level(),
-        );
-        thread::spawn(move || pipewrite(writend));
+        )?;
+        let log_pipewrite = logger.new(slog::o!("component"=>"pipewrite"));
+        thread::spawn(move || pipewrite(writend, log_pipewrite));
         Ok(NTSKeyServer {
             server,
             connections: HashMap::new(),
@@ -194,7 +195,7 @@ impl NTSKeyServer {
             for event in events.iter() {
                 match event.token() {
                     LISTENER => match self.accept() {
-                        Err(err) => {
+                        Err(_err) => {
                             ERROR_COUNTER.inc();
                             error!(self.logger, "Accept failed unrecoverably");
                         }
@@ -203,7 +204,10 @@ impl NTSKeyServer {
                     },
                     TIMER => {
                         // Time to check for expired connections.
-                        unistd::read(self.readend, &mut buf);
+                        if let Err(e) = unistd::read(self.readend, &mut buf) {
+                            error!(self.logger, "unistd::read failed with error: {:?}, \
+                                    can't check for expired connections", e);
+                        }
                         self.check_timeouts();
                     }
                     _ => self.conn_event(&event),
@@ -468,14 +472,17 @@ impl Connection {
     fn die(&self) {
         ERROR_COUNTER.inc();
         error!(self.logger, "forcible shutdown after timeout");
-        self.socket.shutdown(Shutdown::Both);
+        self.socket.shutdown(Shutdown::Both)
+            .expect("cannot shutdown socket");
         self.closed;
     }
 }
 
-fn pipewrite(wr: RawFd) {
+fn pipewrite(wr: RawFd, logger: slog::Logger) {
     loop {
-        unistd::write(wr, &[0; 1]);
+        if let Err(e) = unistd::write(wr, &[0; 1]) {
+            error!(logger, "pipewrite failed with error: {:?}", e);
+        }
         thread::sleep(Duration::from_secs(1));
     }
 }
@@ -488,7 +495,6 @@ pub fn start_nts_ke_server(
     let logger = start_logger.new(slog::o!("component"=>"nts_ke"));
     // First parse config for TLS server using local config module.
     let parsed_config = parse_nts_ke_config(config_filename)?;
-    let port = parsed_config.next_port;
     let mut key_rot = RotatingKeys {
         memcache_url: parsed_config.memcached_url.clone(),
         prefix: "/nts/nts-keys".to_string(),
@@ -518,8 +524,10 @@ pub fn start_nts_ke_server(
     // Now we initialize metrics
     let metrics = parsed_config.metrics.clone();
     info!(logger, "Starting metrics server");
+    let log_metrics = start_logger.new(slog::o!("component"=>"metrics"));
     thread::spawn(move || {
-        metrics::run_metrics(metrics);
+        metrics::run_metrics(metrics, &log_metrics)
+            .expect("metrics could not be run; starting ntp server failed");
     });
     // Time to actually run the server
     run_server_loop(parsed_config.clone(), &logger, keys)

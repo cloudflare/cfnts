@@ -1,12 +1,11 @@
 use std::boxed::Box;
 use std::fs;
 use std::io::BufReader;
-use std::io::Error;
 
 use config::{Config, ConfigError};
 
 use rustls::{
-    internal::pemfile::{certs, pkcs8_private_keys, rsa_private_keys},
+    internal::pemfile::{certs, pkcs8_private_keys},
     Certificate, PrivateKey,
 };
 

@@ -5,16 +5,14 @@ use crate::cookie::{eat_cookie, get_keyid, make_cookie, NTSKeys, COOKIE_SIZE};
 use crate::metrics;
 use crate::rotation::{periodic_rotate, RotatingKeys};
 
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 use lazy_static::lazy_static;
-use prometheus::{opts, register_counter, register_int_counter, IntCounter, Opts};
-use slog::{debug, error, info, trace, warn};
+use prometheus::{opts, register_counter, register_int_counter, IntCounter};
+use slog::{error, info};
 
 use std::collections::HashMap;
-use std::io::{Cursor, Error, ErrorKind};
+use std::io::{Error, ErrorKind};
 use std::net::{
-    SocketAddr,
-    SocketAddr::{V4, V6},
+    SocketAddr::{V6},
     ToSocketAddrs, UdpSocket,
 };
 use std::os::unix::io::AsRawFd;
@@ -30,7 +28,7 @@ use libc::{in6_pktinfo, in_pktinfo};
 use miscreant::aead::Aead;
 use miscreant::aead::Aes128SivAead;
 use nix::sys::socket::{
-    recvmsg, sendmsg, setsockopt, sockopt, CmsgSpace, ControlMessage, MsgFlags, SetSockOpt,
+    recvmsg, sendmsg, setsockopt, sockopt, CmsgSpace, ControlMessage, MsgFlags,
 };
 use nix::sys::time::{TimeVal, TimeValLike};
 use nix::sys::uio::IoVec;
@@ -40,7 +38,7 @@ use super::protocol::{
     extract_extension, has_extension, is_nts_packet, parse_ntp_packet, parse_nts_packet,
     serialize_header, serialize_ntp_packet, serialize_nts_packet, LeapState, LeapState::*,
     NtpExtension, NtpExtensionType::NTSCookie, NtpExtensionType::UniqueIdentifier, NtpPacket,
-    NtpPacketHeader, NtsPacket, PacketMode, PacketMode::*, PHI, UNIX_OFFSET,
+    NtpPacketHeader, NtsPacket, PacketMode, PHI, UNIX_OFFSET,
 };
 
 const BUF_SIZE: usize = 1280; // Anything larger might fragment.
@@ -110,11 +108,14 @@ fn run_server(
     ipv4: bool,
 ) -> Result<(), std::io::Error> {
     let sockfd = socket.as_raw_fd();
-    setsockopt(sockfd, sockopt::ReceiveTimestamp, &true);
+    setsockopt(sockfd, sockopt::ReceiveTimestamp, &true)
+        .expect("setsockopt failed; can't run ntp server");
     if ipv4 {
-        setsockopt(sockfd, sockopt::Ipv4PacketInfo, &true);
+        setsockopt(sockfd, sockopt::Ipv4PacketInfo, &true)
+            .expect("setsockopt failed; can't run ntp server");
     } else {
-        setsockopt(sockfd, sockopt::Ipv6RecvPacketInfo, &true);
+        setsockopt(sockfd, sockopt::Ipv6RecvPacketInfo, &true)
+            .expect("setsockopt failed; can't run ntp server");
     }
     // The following is adapted from the example in the nix crate docs:
     // https://docs.rs/nix/0.13.0/nix/sys/socket/enum.ControlMessage.html#variant.ScmTimestamp
@@ -122,13 +123,13 @@ fn run_server(
     loop {
         // Receive and respond to packets
         let mut buf = [0; BUF_SIZE];
-        let mut flags = MsgFlags::empty();
+        let flags = MsgFlags::empty();
         let mut cmsgspace: CmsgSpace<(TimeVal, CmsgSpace<(in_pktinfo, CmsgSpace<in6_pktinfo>)>)> =
             CmsgSpace::new();
         let iov = [IoVec::from_mut_slice(&mut buf)];
         let r = recvmsg(sockfd, &iov, Some(&mut cmsgspace), flags);
-        if let Err(err) = r {
-            error!(logger, "error receiving message");
+        if let Err(_err) = r {
+            error!(logger, "error receiving message: {:?}", _err);
             continue;
         }
         let r = r.unwrap(); // this is safe because of previous if
@@ -145,7 +146,7 @@ fn run_server(
         for msg in r.cmsgs() {
             match msg {
                 ControlMessage::ScmTimestamp(&r_timestamp) => r_time = r_timestamp,
-                ControlMessage::Ipv4PacketInfo(inf) => {
+                ControlMessage::Ipv4PacketInfo(_inf) => {
                     if ipv4 {
                         msgs.push(msg);
                     } else {
@@ -153,7 +154,7 @@ fn run_server(
                         continue;
                     }
                 }
-                ControlMessage::Ipv6PacketInfo(inf) => {
+                ControlMessage::Ipv6PacketInfo(_inf) => {
                     if !ipv4 {
                         msgs.push(msg);
                     } else {
@@ -255,7 +256,7 @@ pub fn start_ntp_server(
             let servstate = servstate.clone();
             let rot_logger = logger.new(slog::o!("task"=>"refereshing servstate"));
             let socket = UdpSocket::bind("127.0.0.1:0")?; // we only go to local
-            socket.set_read_timeout(Some(time::Duration::from_secs(1)));
+            socket.set_read_timeout(Some(time::Duration::from_secs(1)))?;
             thread::spawn(move || {
                 refresh_servstate(servstate, rot_logger, socket, host, port);
             });
@@ -269,9 +270,10 @@ pub fn start_ntp_server(
     }
     let metrics = parsed_config.metrics.clone();
     info!(logger, "spawning metrics");
-
+    let log_metrics = logger.new(slog::o!("component"=>"metrics"));
     thread::spawn(move || {
-        metrics::run_metrics(metrics);
+        metrics::run_metrics(metrics, &log_metrics)
+            .expect("metrics could not be run; starting ntp server failed");
     });
 
     let wg = WaitGroup::new();
@@ -283,20 +285,15 @@ pub fn start_ntp_server(
         let keys = keys.clone();
         let servstate = servstate.clone();
         info!(logger, "Listening on: {}", socket.local_addr()?);
-        match addr {
-            V4(_) => {
-                thread::spawn(move || {
-                    run_server(socket, keys, servstate, logger, true);
-                    drop(wg);
-                });
-            }
-            V6(_) => {
-                thread::spawn(move || {
-                    run_server(socket, keys, servstate, logger, false);
-                    drop(wg);
-                });
-            }
+        let mut use_ipv4 = true;
+        if let V6(_) = addr {
+            use_ipv4 = false;
         }
+        thread::spawn(move || {
+            run_server(socket, keys, servstate, logger, use_ipv4)
+                .expect("server could not be run");
+            drop(wg);
+        });
     }
     wg.wait();
     Ok(())
@@ -537,8 +534,10 @@ fn refresh_servstate(
             },
             exts: vec![],
         };
-        sock.connect((host, port));
-        sock.send(&serialize_ntp_packet(query_packet));
+        sock.connect((host, port))
+            .expect("socket connection to server failed, failed to refresh server state");
+        sock.send(&serialize_ntp_packet(query_packet))
+            .expect("sending ntp packet to server failed, failed to refresh server state");
         UPSTREAM_QUERY_COUNTER.inc();
         let mut buff = [0; 2048];
         let res = sock.recv_from(&mut buff);

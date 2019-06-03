@@ -1,9 +1,8 @@
 use libc::*;
 use net2::{TcpBuilder, UdpBuilder};
 use std::io::{Error, ErrorKind};
-use std::net;
 use std::net::{SocketAddr, SocketAddr::*};
-use std::os::unix::io::{AsRawFd, RawFd};
+use std::os::unix::io::{AsRawFd};
 
 fn set_freebind(fd: c_int) -> Result<(), std::io::Error> {
     const IP_FREEBIND: libc::c_int = 0xf;

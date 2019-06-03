@@ -1,4 +1,3 @@
-#[macro_use]
 extern crate lazy_static;
 extern crate log;
 extern crate prometheus;
@@ -17,13 +16,13 @@ use clap::App;
 use clap::Arg;
 use clap::SubCommand;
 
-use slog::{debug, error, info, trace};
+use slog::{debug, error};
 use slog_stdlog;
 use sloggers::terminal::{Destination, TerminalLoggerBuilder};
 use sloggers::types::Severity;
 use sloggers::Build;
 
-use crate::ntp::client::{run_nts_ntp_client, NtpResult};
+use crate::ntp::client::{run_nts_ntp_client};
 use crate::ntp::server::start_ntp_server;
 use crate::nts_ke::client::run_nts_ke_client;
 use crate::nts_ke::server::start_nts_ke_server;
@@ -65,8 +64,11 @@ fn main() {
     }
 
     let logger = builder.build().unwrap();
-    slog_stdlog::init();
-    let _guard = slog_scope::set_global_logger(logger.clone());
+    if let Err(e) = slog_stdlog::init() {
+        error!(logger, "slog_stlog could not be initialized with error: {:?}", e);
+        process::exit(1);
+    }
+    let _scope_guard = slog_scope::set_global_logger(logger.clone());
 
     // TODO: remove this if statement when .subcommand_required_else_help(true) works.
     if let None = matches.subcommand {

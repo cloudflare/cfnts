@@ -9,8 +9,8 @@ use memcache;
 use memcache::MemcacheError;
 
 use lazy_static::lazy_static;
-use prometheus::{opts, register_counter, register_int_counter, IntCounter, Opts};
-use slog::{debug, error, info, trace, warn};
+use prometheus::{opts, register_counter, register_int_counter, IntCounter};
+use slog::{error};
 
 use ring::digest;
 use ring::hmac;
@@ -69,7 +69,7 @@ impl VecMap for MemcacheVecMap {
 impl RotatingKeys {
     pub fn rotate_keys(&mut self) -> Result<(), Box<std::error::Error>> {
         ROTATION_COUNTER.inc();
-        let mut client = memcache::Client::connect(self.memcache_url.clone())?;
+        let client = memcache::Client::connect(self.memcache_url.clone())?;
         let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
         let timestamp = now.as_secs() as i64;
         let mut vecmap = MemcacheVecMap { client: client };
@@ -134,7 +134,7 @@ pub fn periodic_rotate(rotor: Arc<RwLock<RotatingKeys>>) {
 }
 
 fn inner(rotor: &mut Arc<RwLock<RotatingKeys>>) {
-    rotor.write().unwrap().rotate_keys();
+    let _ = rotor.write().unwrap().rotate_keys();
 }
 
 fn read_sleep(rotor: &Arc<RwLock<RotatingKeys>>) -> i64 {

@@ -1,23 +1,17 @@
-use crate::cookie;
 use crate::nts_ke::client::NtsKeResult;
 
-use miscreant::aead;
 use miscreant::aead::Aead;
 use miscreant::aead::Aes128SivAead;
 use rand::Rng;
-use slog::{debug, error, info, trace, warn};
+use slog::{info};
 
-use std::boxed::Box;
 use std::net::UdpSocket;
-use std::time::{Duration, SystemTime};
 
 use super::protocol::parse_nts_packet;
-use super::protocol::serialize_ntp_packet;
 use super::protocol::serialize_nts_packet;
 use super::protocol::LeapState;
 use super::protocol::NtpExtension;
 use super::protocol::NtpExtensionType::*;
-use super::protocol::NtpPacket;
 use super::protocol::NtpPacketHeader;
 use super::protocol::NtsPacket;
 use super::protocol::PacketMode::Client;
@@ -34,7 +28,7 @@ pub fn run_nts_ntp_client(
     logger: &slog::Logger,
     state: NtsKeResult,
 ) -> Result<NtpResult, std::io::Error> {
-    let mut socket: Option<UdpSocket> = None;
+    let socket: Option<UdpSocket>;
     if let Some(true) = state.use_ipv6 {
         socket = Some(UdpSocket::bind("[::]:0")?);
     } else {
@@ -80,7 +74,7 @@ pub fn run_nts_ntp_client(
     socket.send(wire_packet)?;
     info!(logger, "transmitting packet");
     let mut buff = [0; BUFF_SIZE];
-    let (size, origin) = socket.recv_from(&mut buff)?;
+    let (size, _origin) = socket.recv_from(&mut buff)?;
     info!(logger, "received packet");
     let recieved = parse_nts_packet::<Aes128SivAead>(&buff[0..size], &mut recv_aead);
     match recieved {

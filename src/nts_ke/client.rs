@@ -1,13 +1,11 @@
-use slog::{debug, error, info, trace, warn};
-use std::error;
+use slog::{debug, info};
 use std::error::Error;
 use std::fmt;
-use std::io::{stdout, Read, Write};
+use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream};
 use std::sync::Arc;
 
 use rustls;
-use rustls::Session;
 use webpki;
 use webpki_roots;
 
@@ -109,7 +107,7 @@ pub fn run_nts_ke_client(
     match parsed_config.trusted_cert {
         Some(certs) => {
             info!(logger, "loading custom trust root");
-            tls_config.root_store.add(&certs);
+            tls_config.root_store.add(&certs)?;
         }
         None => tls_config
             .root_store
@@ -206,7 +204,7 @@ pub fn run_nts_ke_client(
         }
     }
     debug!(logger, "saw the end of the response");
-    stream.shutdown(Shutdown::Both);
+    stream.shutdown(Shutdown::Both)?;
 
     Ok(NtsKeResult {
         aead_scheme: state.aead_scheme,

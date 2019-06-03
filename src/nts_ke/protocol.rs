@@ -12,7 +12,6 @@ use self::NtsKeType::*;
 use std::error;
 use std::error::Error;
 use std::fmt;
-use std::io::Cursor;
 
 const CRIT_BIT: u16 = 0x8000;
 const HEADER_SIZE: usize = 4;

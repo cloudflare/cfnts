@@ -1,7 +1,9 @@
 [package]
 name = "nts"
 version = "2019.6.0"
-authors = ["Watson Ladd <watson@cloudflare.com>", "Gabbi Fisher <gabbi@cloudflare.com>"]
+authors = ["Watson Ladd <watson@cloudflare.com>",
+           "Gabbi Fisher <gabbi@cloudflare.com>",
+           "Tanya Verma <tverma@cloudflare.com>"]
 edition = "2018"
 
 [dependencies]

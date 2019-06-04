@@ -1,3 +1,7 @@
+2019.6.0
+- 2019-06-04 CRYPTO-1040: Conform with HTTP 1.1 in metrics
+- 2019-06-04 Bump version in Cargo.toml to release tag
+
 2019.5.2
 - 2019-05-31 CRYPTO-1016: Test with chain, avoid races with logger
 - 2019-05-31 Bump version in Cargo.toml to release tag

@@ -28,7 +28,7 @@ fn scrape_result() -> String {
     let encoder = prometheus::TextEncoder::new();
     let families = prometheus::gather();
     encoder.encode(&families, &mut buffer).unwrap();
-    "HTTP/1.1\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n".to_owned()
+    "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\n\r\n".to_owned()
         + &String::from_utf8(buffer).unwrap()
 }
 

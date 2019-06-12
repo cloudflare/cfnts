@@ -12,5 +12,5 @@ jobs:
 workflows:
   "main":
     jobs:
-      - test
+      - cargo_test
 

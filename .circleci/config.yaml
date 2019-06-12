@@ -1,0 +1,18 @@
+version: 2.1
+.native_job: &nativejob
+  docker: # runs with docker
+    - image: circleci/rust:1.35.0-stretch
+  steps:
+    - checkout
+    - run:
+        name: "Run tests"
+        command:
+          cargo test
+    - run:
+        name: "Build"
+        command:
+          cargo build
+    - run:
+        name: "Integration"
+        command:
+          docker-compose up --force-recreate --build --abort-on-container-exit

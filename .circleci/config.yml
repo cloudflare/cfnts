@@ -1,0 +1,16 @@
+version: 2.1
+jobs:
+  build:
+    docker:
+      - image: circleci/rust:1.35.0-stretch
+    steps:
+      - checkout
+      - run:
+          name: "Run tests"
+          command:
+            cargo test
+workflow:
+  "build":
+    jobs:
+      - build
+

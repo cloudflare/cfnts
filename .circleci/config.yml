@@ -1,21 +1,21 @@
-version: 2.0
+version: 2
 jobs:
   build:
     docker:
-      - image: circleci/rust:1.35.0-stretch
+    - image: circleci/rust:1.35.0-stretch
     steps:
-      - checkout
-      - run: 
-          name: "Vendoring"
-          command: |
-            wget https://github.com/alexcrichton/cargo-vendor/releases/download/0.1.23/cargo-vendor-0.1.23-x86_64-unknown-linux-musl.tar.gz
-            tar xfz cargo-vendor-0.1.23-x86_64-unknown-linux-musl.tar.gz
-            cargo-vendor-0.1.23-x86_64-unknown-linux-musl/cargo-vendor vendor >> .cargo/config
-      - run:
-          name: "Run tests"
-          command:
-            cargo test
+    - checkout
+    - run:
+        name: Version
+        command: rustc --version; cargo --version; rustup --version
+    - run:
+        name: Compiling
+        command: cargo build --release
+    - run:
+        name: Running tests
+        command: cargo test --release
 workflows:
-  "main":
+  main:
     jobs:
-      - build
+    - build
+  version: 2

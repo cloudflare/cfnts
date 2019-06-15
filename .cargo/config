@@ -2,8 +2,4 @@
 rustflags = ["-Ctarget-feature=+aes,+ssse3"]
 [test]
 rustflags = ["-Ctarget-feature=+aes,+ssse3"]
-[source.crates-io]
-replace-with = "vendored-sources"
 
-[source.vendored-sources]
-directory = "vendor"

@@ -1,16 +1,21 @@
-version: 2.1
+version: 2
 jobs:
-  cargo_test:
+  build:
     docker:
-      - image: circleci/rust:1.35.0-stretch
+    - image: circleci/rust:1.35.0-stretch
     steps:
-      - checkout
-      - run:
-          name: "Run tests"
-          command:
-            cargo test
+    - checkout
+    - run:
+        name: Version
+        command: rustc --version; cargo --version; rustup --version
+    - run:
+        name: Compiling
+        command: cargo build --release
+    - run:
+        name: Running tests
+        command: cargo test --release
 workflows:
-  "main":
+  main:
     jobs:
-      - cargo_test
-
+    - build
+  version: 2

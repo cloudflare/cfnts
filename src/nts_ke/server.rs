@@ -38,7 +38,6 @@ use super::protocol::{NtsKeRecord, NtsKeType};
 const LISTENER: mio::Token = mio::Token(0);
 const TIMER: mio::Token = mio::Token(1);
 
-// TODO: add timeouts, explicitly
 lazy_static! {
     static ref QUERY_COUNTER: IntCounter =
         register_int_counter!("nts_queries_total", "Number of NTS requests").unwrap();
@@ -47,6 +46,7 @@ lazy_static! {
     static ref TIMEOUT_COUNTER: IntCounter =
         register_int_counter!("nts_timeouts_total", "Number of connections that time out").unwrap();
 }
+
 // response uses the configuration and the keys and computes the response
 // sent to the client.
 fn response(keys: NTSKeys, master_key: &Arc<RwLock<RotatingKeys>>, port: &u16) -> Vec<u8> {
@@ -195,9 +195,9 @@ impl NTSKeyServer {
             for event in events.iter() {
                 match event.token() {
                     LISTENER => match self.accept() {
-                        Err(_err) => {
+                        Err(err) => {
                             ERROR_COUNTER.inc();
-                            error!(self.logger, "Accept failed unrecoverably");
+                            error!(self.logger, "Accept failed unrecoverably with error: {:?}", err);
                         }
 
                         Ok(_) => {}
@@ -250,6 +250,7 @@ impl NTSKeyServer {
                     ),
                 );
                 self.connections[&token].register(&mut self.poll);
+
                 Ok(())
             }
             Err(e) => {
@@ -490,7 +491,7 @@ fn pipewrite(wr: RawFd, logger: slog::Logger) {
 /// start_nts_ke_server reads the configuration and starts the server.
 pub fn start_nts_ke_server(
     start_logger: &slog::Logger,
-    config_filename: &str,
+    config_filename: &str
 ) -> Result<(), Box<std::error::Error>> {
     let logger = start_logger.new(slog::o!("component"=>"nts_ke"));
     // First parse config for TLS server using local config module.
@@ -522,13 +523,15 @@ pub fn start_nts_ke_server(
     periodic_rotate(keys.clone());
 
     // Now we initialize metrics
-    let metrics = parsed_config.metrics.clone();
-    info!(logger, "Starting metrics server");
-    let log_metrics = start_logger.new(slog::o!("component"=>"metrics"));
-    thread::spawn(move || {
-        metrics::run_metrics(metrics, &log_metrics)
-            .expect("metrics could not be run; starting ntp server failed");
-    });
+    if let Some(metrics_config) = parsed_config.metrics.clone() {
+        let metrics = metrics_config.clone();
+        info!(logger, "spawning metrics");
+        let log_metrics = logger.new(slog::o!("component"=>"metrics"));
+        thread::spawn(move || {
+            metrics::run_metrics(metrics, &log_metrics)
+                .expect("metrics could not be run; starting ntp server failed");
+        });
+    }
     // Time to actually run the server
     run_server_loop(parsed_config.clone(), &logger, keys)
 }
@@ -550,9 +553,11 @@ fn run_server_loop(
     let timeout = parsed_config.conn_timeout.unwrap_or(30);
 
     let wg = WaitGroup::new();
+    eprintln!("parsed_config.addrs: {:?}", parsed_config.addrs);
     for addr in parsed_config.addrs {
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
         let listener = cfsock::tcp_listener(&addr)?;
+        eprintln!("listener: {:?}", listener);
         let mut tlsserv = NTSKeyServer::new(
             TcpListener::from_listener(listener, &addr)?,
             conf.clone(),

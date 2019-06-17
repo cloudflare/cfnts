@@ -205,7 +205,7 @@ fn run_server(
 /// start_ntp_server runs the ntp server with the config specified in config_filename
 pub fn start_ntp_server(
     logger: &slog::Logger,
-    config_filename: &str,
+    config_filename: &str
 ) -> Result<(), Box<dyn std::error::Error>> {
     let logger = logger.new(slog::o!("component"=>"ntp"));
     // First parse config for TLS server using local config module.
@@ -268,13 +268,16 @@ pub fn start_ntp_server(
             (*state_guard).stratum = 1;
         }
     }
-    let metrics = parsed_config.metrics.clone();
-    info!(logger, "spawning metrics");
-    let log_metrics = logger.new(slog::o!("component"=>"metrics"));
-    thread::spawn(move || {
-        metrics::run_metrics(metrics, &log_metrics)
-            .expect("metrics could not be run; starting ntp server failed");
-    });
+
+    if let Some(metrics_config) = parsed_config.metrics {
+        let metrics = metrics_config.clone();
+        info!(logger, "spawning metrics");
+        let log_metrics = logger.new(slog::o!("component"=>"metrics"));
+        thread::spawn(move || {
+            metrics::run_metrics(metrics, &log_metrics)
+                .expect("metrics could not be run; starting ntp server failed");
+        });
+    }
 
     let wg = WaitGroup::new();
     for addr in parsed_config.addrs {
@@ -382,12 +385,14 @@ fn response(
                     Some(key) => {
                         let nts_keys = eat_cookie(&cookie.contents, key);
                         match nts_keys {
-                            Some(nts_dir_keys) => Ok(process_nts(
-                                resp_header,
-                                nts_dir_keys,
-                                cookie_keys.clone(),
-                                query,
-                            )),
+                            Some(nts_dir_keys) => {
+                                Ok(process_nts(
+                                    resp_header,
+                                    nts_dir_keys,
+                                    cookie_keys.clone(),
+                                    query,
+                                ))
+                            },
                             None => {
                                 UNDECRYPTABLE_COOKIE_COUNTER.inc();
                                 error!(logger, "undecryptable cookie with keyid {:x?}", keyid);

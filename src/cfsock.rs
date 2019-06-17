@@ -1,9 +1,10 @@
 use libc::*;
 use net2::{TcpBuilder, UdpBuilder};
-use std::io::{Error, ErrorKind};
 use std::net::{SocketAddr, SocketAddr::*};
-use std::os::unix::io::{AsRawFd};
+use std::io::{Error, ErrorKind};
+use std::os::unix::io::AsRawFd;
 
+#[cfg(target_os = "linux")]
 fn set_freebind(fd: c_int) -> Result<(), std::io::Error> {
     const IP_FREEBIND: libc::c_int = 0xf;
     match unsafe {
@@ -21,6 +22,11 @@ fn set_freebind(fd: c_int) -> Result<(), std::io::Error> {
         )),
         _ => Ok(()),
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn set_freebind(_fd: c_int) -> Result<(), std::io::Error> {
+    Ok(()) // no op for mac build
 }
 
 pub fn tcp_listener(addr: &SocketAddr) -> Result<std::net::TcpListener, std::io::Error> {

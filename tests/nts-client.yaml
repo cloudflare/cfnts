@@ -1,4 +1,0 @@
-host: server
-port: 1234
-trusted_certificate: tests/ca.pem
-use_ipv6: true

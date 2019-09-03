@@ -1,5 +1,5 @@
 [package]
-name        = "nts"
+name        = "cfnts"
 version     = "2019.6.0"
 authors = [
     "Watson Ladd <watson@cloudflare.com>",

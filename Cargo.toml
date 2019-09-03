@@ -42,10 +42,11 @@ slog = { version = "2.4.1", features = [
 slog-scope  = "4.1.1"
 
 # Used for fowarding all the `log` crate logging to `slog_scope::logger()`.
-slog-stdlog = "3.0.2"
+slog-stdlog = "~3.0.2"
 
-# A wrapper of `slog` to make logging more convenient.
-sloggers    = "0.3.2"
+# A wrapper of `slog` to make logging more convenient. If you want to increase a version here,
+# please make sure that `TerminalLoggerBuilder::build` doesn't return an error.
+sloggers    = "=0.3.2"
 
 webpki      = "0.19.1"
 webpki-roots = "0.16.0"

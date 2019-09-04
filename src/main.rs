@@ -11,6 +11,7 @@ extern crate slog_stdlog;
 extern crate sloggers;
 
 mod cfsock;
+mod client;
 mod cmd;
 mod config;
 mod cookie;
@@ -21,13 +22,9 @@ mod ntp_server;
 mod nts_ke;
 mod rotation;
 
-use slog::debug;
 use sloggers::terminal::{Destination, TerminalLoggerBuilder};
 use sloggers::types::Severity;
 use sloggers::Build;
-
-use crate::ntp::client::run_nts_ntp_client;
-use crate::nts_ke::client::run_nts_ke_client;
 
 use std::process;
 
@@ -80,68 +77,10 @@ fn main() {
     if let Some(ke_server_matches) = matches.subcommand_matches("ke-server") {
         ke_server::run(ke_server_matches);
     }
-
     if let Some(ntp_server_matches) = matches.subcommand_matches("ntp-server") {
         ntp_server::run(ntp_server_matches);
     }
-
-    if let Some(nts_client) = matches.subcommand_matches("nts-client") {
-        let host = nts_client.value_of("server_hostname").map(String::from).unwrap();
-        let port = nts_client.value_of("port").map(String::from);
-        let cert_file = nts_client.value_of("cert").map(String::from);
-
-        // By default, use_ipv4 is None (no preference for using either ipv4 or ipv6
-        // so client sniffs which one to use based on support)
-        // However, if a user specifies the ipv4 flag, we set use_ipv4 = Some(true)
-        // If they specify ipv6 (only one can be specified as they are mutually exclusive
-        // args), set use_ipv4 = Some(false)
-        let ipv4 = nts_client.is_present("ipv4");
-        let mut use_ipv4 = None;
-        if ipv4 {
-            use_ipv4 = Some(true);
-        } else {
-            // Now need to check whether ipv6 is being used, since ipv4 has not been mandated
-            if nts_client.is_present("ipv6") {
-                use_ipv4 = Some(false);
-            }
-        }
-
-        let mut trusted_cert = None;
-        if let Some(file) = cert_file {
-            if let Ok(certs) = config::load_tls_certs(file) {
-                trusted_cert = Some(certs[0].clone());
-            }
-        }
-
-        let client_config = config::ConfigNTSClient {
-            host,
-            port,
-            trusted_cert,
-            use_ipv4
-        };
-
-        let res = run_nts_ke_client(&logger, client_config);
-
-        match res {
-            Err(err) => {
-                eprintln!("failure of tls stage {:?}", err);
-                process::exit(125)
-            }
-            Ok(_) => {}
-        }
-        let state = res.unwrap();
-        debug!(logger, "running UDP client with state {:x?}", state);
-        let res = run_nts_ntp_client(&logger, state);
-        match res {
-            Err(err) => {
-                eprintln!("Failure of client {:?}", err);
-                process::exit(126)
-            }
-            Ok(result) => {
-                println!("stratum: {:}", result.stratum);
-                println!("offset: {:.6}", result.time_diff);
-                process::exit(0)
-            }
-        }
+    if let Some(client_matches) = matches.subcommand_matches("client") {
+        client::run(client_matches);
     }
 }

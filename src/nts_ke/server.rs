@@ -25,7 +25,6 @@ use nix::unistd::pipe;
 use rustls::{NoClientAuth, ProtocolVersion, ServerConfig, Session};
 
 use crate::cfsock;
-use crate::config::parse_nts_ke_config;
 use crate::config::ConfigNTSKE;
 use crate::cookie::{make_cookie, NTSKeys};
 use crate::metrics;
@@ -491,18 +490,17 @@ fn pipewrite(wr: RawFd, logger: slog::Logger) {
 /// start_nts_ke_server reads the configuration and starts the server.
 pub fn start_nts_ke_server(
     start_logger: &slog::Logger,
-    config_filename: &str
+    config: ConfigNTSKE,
 ) -> Result<(), Box<std::error::Error>> {
     let logger = start_logger.new(slog::o!("component"=>"nts_ke"));
     // First parse config for TLS server using local config module.
-    let parsed_config = parse_nts_ke_config(config_filename)?;
     let mut key_rot = RotatingKeys {
-        memcache_url: parsed_config.memcached_url.clone(),
+        memcache_url: config.memcached_url.clone(),
         prefix: "/nts/nts-keys".to_string(),
         duration: 3600,
         forward_periods: 2,
         backward_periods: 24,
-        master_key: parsed_config.cookie_key.clone(),
+        master_key: config.cookie_key.clone(),
         latest: [0; 4],
         keys: HashMap::new(),
         logger: logger.clone(),
@@ -523,7 +521,7 @@ pub fn start_nts_ke_server(
     periodic_rotate(keys.clone());
 
     // Now we initialize metrics
-    if let Some(metrics_config) = parsed_config.metrics.clone() {
+    if let Some(metrics_config) = config.metrics.clone() {
         let metrics = metrics_config.clone();
         info!(logger, "spawning metrics");
         let log_metrics = logger.new(slog::o!("component"=>"metrics"));
@@ -533,7 +531,7 @@ pub fn start_nts_ke_server(
         });
     }
     // Time to actually run the server
-    run_server_loop(parsed_config.clone(), &logger, keys)
+    run_server_loop(config.clone(), &logger, keys)
 }
 
 fn run_server_loop(

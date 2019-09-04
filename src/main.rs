@@ -14,6 +14,7 @@ mod cfsock;
 mod cmd;
 mod config;
 mod cookie;
+mod ke_server;
 mod metrics;
 mod ntp;
 mod nts_ke;
@@ -27,7 +28,6 @@ use sloggers::Build;
 use crate::ntp::client::{run_nts_ntp_client};
 use crate::ntp::server::start_ntp_server;
 use crate::nts_ke::client::run_nts_ke_client;
-use crate::nts_ke::server::start_nts_ke_server;
 
 use std::process;
 
@@ -77,12 +77,8 @@ fn main() {
         process::exit(1);
     }
 
-    if let Some(nts_ke) = matches.subcommand_matches("nts-ke") {
-        let config_file = nts_ke.value_of("config_file").unwrap();
-        if let Err(err) = start_nts_ke_server(&logger, config_file) {
-            eprintln!("Starting NTS-KE server failed: {:?}", err);
-            process::exit(127);
-        }
+    if let Some(ke_server_matches) = matches.subcommand_matches("ke-server") {
+        ke_server::run(ke_server_matches);
     }
 
     if let Some(ntp) = matches.subcommand_matches("ntp") {

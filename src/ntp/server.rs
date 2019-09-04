@@ -1,6 +1,5 @@
-use crate::config::parse_ntp_config;
-
 use crate::cfsock;
+use crate::config::ConfigNTP;
 use crate::cookie::{eat_cookie, get_keyid, make_cookie, NTSKeys, COOKIE_SIZE};
 use crate::metrics;
 use crate::rotation::{periodic_rotate, RotatingKeys};
@@ -205,19 +204,17 @@ fn run_server(
 /// start_ntp_server runs the ntp server with the config specified in config_filename
 pub fn start_ntp_server(
     logger: &slog::Logger,
-    config_filename: &str
+    config: ConfigNTP,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let logger = logger.new(slog::o!("component"=>"ntp"));
-    // First parse config for TLS server using local config module.
-    let parsed_config = parse_ntp_config(config_filename)?;
 
     let mut key_rot = RotatingKeys {
-        memcache_url: parsed_config.memcached_url,
+        memcache_url: config.memcached_url,
         prefix: "/nts/nts-keys".to_string(),
         duration: 3600,
         forward_periods: 2,
         backward_periods: 24,
-        master_key: parsed_config.cookie_key,
+        master_key: config.cookie_key,
         latest: [0; 4],
         keys: HashMap::new(),
         logger: logger.clone(),
@@ -250,7 +247,7 @@ pub fn start_ntp_server(
     };
 
     let servstate = Arc::new(RwLock::new(servstate_struct));
-    match parsed_config.upstream_addr {
+    match config.upstream_addr {
         Some((host, port)) => {
             info!(logger, "connecting to upstream");
             let servstate = servstate.clone();
@@ -269,7 +266,7 @@ pub fn start_ntp_server(
         }
     }
 
-    if let Some(metrics_config) = parsed_config.metrics {
+    if let Some(metrics_config) = config.metrics {
         let metrics = metrics_config.clone();
         info!(logger, "spawning metrics");
         let log_metrics = logger.new(slog::o!("component"=>"metrics"));
@@ -280,7 +277,7 @@ pub fn start_ntp_server(
     }
 
     let wg = WaitGroup::new();
-    for addr in parsed_config.addrs {
+    for addr in config.addrs {
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
         let socket = cfsock::udp_listen(&addr)?;
         let wg = wg.clone();

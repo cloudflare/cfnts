@@ -17,16 +17,16 @@ mod cookie;
 mod ke_server;
 mod metrics;
 mod ntp;
+mod ntp_server;
 mod nts_ke;
 mod rotation;
 
-use slog::{debug, error};
+use slog::debug;
 use sloggers::terminal::{Destination, TerminalLoggerBuilder};
 use sloggers::types::Severity;
 use sloggers::Build;
 
-use crate::ntp::client::{run_nts_ntp_client};
-use crate::ntp::server::start_ntp_server;
+use crate::ntp::client::run_nts_ntp_client;
 use crate::nts_ke::client::run_nts_ke_client;
 
 use std::process;
@@ -81,12 +81,8 @@ fn main() {
         ke_server::run(ke_server_matches);
     }
 
-    if let Some(ntp) = matches.subcommand_matches("ntp") {
-        let config_file = ntp.value_of("config_file").unwrap();
-        if let Err(err) = start_ntp_server(&logger, config_file) {
-            error!(logger, "Starting UDP server failed: {}", err);
-            process::exit(126);
-        }
+    if let Some(ntp_server_matches) = matches.subcommand_matches("ntp-server") {
+        ntp_server::run(ntp_server_matches);
     }
 
     if let Some(nts_client) = matches.subcommand_matches("nts-client") {

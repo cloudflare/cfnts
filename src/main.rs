@@ -5,16 +5,13 @@ extern crate slog;
 extern crate sloggers;
 
 mod cfsock;
+mod cmd;
 mod config;
 mod cookie;
 mod metrics;
 mod ntp;
 mod nts_ke;
 mod rotation;
-
-use clap::App;
-use clap::Arg;
-use clap::SubCommand;
 
 use slog::{debug, error};
 use slog_stdlog;
@@ -29,40 +26,8 @@ use crate::nts_ke::server::start_nts_ke_server;
 
 use std::process;
 
-fn app() -> App<'static, 'static> {
-    App::new("cf-nts")
-        .about("Cloudflare's NTS implementation.")
-        .version("v0.1")
-        // .subcommand_required_else_help(true) TODO: this seems to be very broken in the clap crate.
-        .arg(
-            Arg::with_name("DEBUG")
-                .short("d")
-                .long("debug")
-                .help("turns on debug logging"),
-        )
-        .subcommands(vec![
-            SubCommand::with_name("nts-ke")
-                .about("Runs NTS-KE server over TLS/TCP")
-                .arg(Arg::with_name("config_file").index(1).required(true)),
-            SubCommand::with_name("ntp")
-                .about("Interfaces with NTP using UDP")
-                .arg(Arg::with_name("config_file").index(1).required(true)),
-            SubCommand::with_name("nts-client")
-                .about("Runs a client")
-                .arg(Arg::with_name("server_hostname").index(1)
-                    .required(true).help("NTS server's hostname (do not include port)"))
-                .arg(Arg::with_name("port").short("p").takes_value(true)
-                    .required(false).help("NTS server's port; default is 1234"))
-                .arg(Arg::with_name("cert").short("c").takes_value(true)
-                    .required(false).help("path to trusted certificate (pem file)"))
-                .arg(Arg::with_name("ipv4").short("4").
-                    conflicts_with("ipv6").help("force use of ipv4 only"))
-                .arg(Arg::with_name("ipv6").short("6").help("force use of ipv6 only"))
-        ])
-}
-
 fn main() {
-    let matches = app().get_matches();
+    let matches = cmd::create_clap_command().get_matches();
     let mut builder = TerminalLoggerBuilder::new();
     builder.level(Severity::Info);
     builder.destination(Destination::Stderr);

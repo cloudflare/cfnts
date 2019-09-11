@@ -1,4 +1,4 @@
-// This file is part of cf-nts.
+// This file is part of cfnts.
 // Copyright (c) 2019, Cloudflare. All rights reserved.
 // See LICENSE for licensing information.
 
@@ -51,7 +51,7 @@ fn create_logger<'a>(matches: &clap::ArgMatches<'a>) -> slog::Logger {
     builder.build().expect("BUG: TerminalLoggerBuilder::build shouldn't return an error.")
 }
 
-/// The entry point of cf-nts.
+/// The entry point of cfnts.
 fn main() {
     // According to the documentation of `get_matches`, if the parsing fails, an error will be
     // displayed to the user and the process will exit with an error code.

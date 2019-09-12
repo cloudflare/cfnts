@@ -7,14 +7,13 @@
 use rustls::{Certificate, PrivateKey};
 use rustls::internal::pemfile;
 
-use std::boxed::Box;
 use std::convert::TryFrom;
-use std::error::Error;
 use std::fs::File;
 use std::io;
 
 use crate::cookie::CookieKey;
 use crate::config::MetricsConfig;
+use crate::error::WrapError;
 
 fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
     let mut metrics = None;
@@ -27,34 +26,6 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
         }
     }
     return metrics;
-}
-
-/// `WrapError` allows the implementor to wrap its own error type in another error type.
-// TODO: This trait shouldn't be in this module. I will move it after we get an appropriate module.
-pub trait WrapError<T: Error> {
-    /// The returned type in case that the result has no error.
-    type Item;
-
-    /// Wrapping an error in the error type `T`.
-    fn wrap_err(self) -> Result<Self::Item, T>;
-}
-
-// The reason that we have a lifetime bound 'static is that we want T to either contain no lifetime
-// parameter or contain only the 'static lifetime parameter.
-//
-// TODO: This implementation shouldn't be in this module. I will move it after we get an
-// appropriate module.
-impl<S, T> WrapError<config::ConfigError> for Result<S, T>
-    where T : 'static + Error + Send + Sync
-{
-    /// Don't change the returned type, in case there is no error.
-    type Item = S;
-
-    fn wrap_err(self) -> Result<S, config::ConfigError> {
-        self.map_err(|error| {
-            config::ConfigError::Foreign(Box::new(error))
-        })
-    }
 }
 
 /// Configuration for running an NTS-KE server.

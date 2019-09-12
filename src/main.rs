@@ -15,6 +15,7 @@ mod client;
 mod cmd;
 mod config;
 mod cookie;
+mod error;
 mod ke_server;
 mod metrics;
 mod ntp;

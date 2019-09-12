@@ -1,4 +1,4 @@
-// This file is part of cf-nts.
+// This file is part of cfnts.
 // Copyright (c) 2019, Cloudflare. All rights reserved.
 // See LICENSE for licensing information.
 
@@ -39,7 +39,7 @@ fn create_clap_ke_server_subcommand<'a, 'b>() -> App<'a, 'b> {
         Arg::with_name("configfile").long("file").short("f")
             .takes_value(true).required(false)
             .help("Specifies a path to the configuration file. If the path is not specified, \
-                   the system-wide configuration file (/etc/cf-nts/ke-server.config) will be \
+                   the system-wide configuration file (/etc/cfnts/ke-server.config) will be \
                    used instead")
     ];
 
@@ -56,7 +56,7 @@ fn create_clap_ntp_server_subcommand<'a, 'b>() -> App<'a, 'b> {
         Arg::with_name("configfile").long("file").short("f")
             .takes_value(true).required(false)
             .help("Specifies a path to the configuration file. If the path is not specified, \
-                   the system-wide configuration file (/etc/cf-nts/ntp-server.config) will be \
+                   the system-wide configuration file (/etc/cfnts/ntp-server.config) will be \
                    used instead")
     ];
 

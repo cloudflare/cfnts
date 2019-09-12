@@ -4,9 +4,12 @@
 
 //! NTS-KE server implementation.
 
+mod config;
+
+pub use self::config::{Config as KeServerConfig};
+
 use std::process;
 
-use crate::config;
 use crate::nts_ke::server::start_nts_ke_server;
 
 /// Get a configuration file path for `ke-server`.
@@ -30,7 +33,7 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
 
     // Get the config file path.
     let filename = resolve_config_filename(&matches);
-    let config = config::parse_nts_ke_config(&filename).unwrap();
+    let config = config::Config::parse(&filename).unwrap();
 
     if let Err(err) = start_nts_ke_server(&logger, config) {
         eprintln!("Starting NTS-KE server failed: {:?}", err);

@@ -25,7 +25,7 @@ use nix::unistd::pipe;
 use rustls::{NoClientAuth, ProtocolVersion, ServerConfig, Session};
 
 use crate::cfsock;
-use crate::config::ConfigNTSKE;
+use crate::ke_server::KeServerConfig;
 use crate::cookie::{make_cookie, NTSKeys};
 use crate::metrics;
 use crate::rotation::{periodic_rotate, RotatingKeys};
@@ -490,7 +490,7 @@ fn pipewrite(wr: RawFd, logger: slog::Logger) {
 /// start_nts_ke_server reads the configuration and starts the server.
 pub fn start_nts_ke_server(
     start_logger: &slog::Logger,
-    config: ConfigNTSKE,
+    config: KeServerConfig,
 ) -> Result<(), Box<std::error::Error>> {
     let logger = start_logger.new(slog::o!("component"=>"nts_ke"));
     // First parse config for TLS server using local config module.
@@ -500,7 +500,7 @@ pub fn start_nts_ke_server(
         duration: 3600,
         forward_periods: 2,
         backward_periods: 24,
-        master_key: config.cookie_key.clone(),
+        master_key: Vec::from(config.cookie_key.as_bytes()),
         latest: [0; 4],
         keys: HashMap::new(),
         logger: logger.clone(),
@@ -531,11 +531,11 @@ pub fn start_nts_ke_server(
         });
     }
     // Time to actually run the server
-    run_server_loop(config.clone(), &logger, keys)
+    run_server_loop(config, &logger, keys)
 }
 
 fn run_server_loop(
-    parsed_config: ConfigNTSKE,
+    parsed_config: KeServerConfig,
     logger: &slog::Logger,
     keys: Arc<RwLock<RotatingKeys>>,
 ) -> Result<(), Box<std::error::Error>> {
@@ -544,7 +544,7 @@ fn run_server_loop(
     let alpn_proto = String::from("ntske/1");
     let alpn_bytes = alpn_proto.into_bytes();
     server_config
-        .set_single_cert(parsed_config.tls_certs, parsed_config.tls_keys[0].clone())
+        .set_single_cert(parsed_config.tls_certs, parsed_config.tls_secret_keys[0].clone())
         .expect("invalid key or certificate");
     server_config.set_protocols(&[alpn_bytes]);
     let conf = Arc::new(server_config);

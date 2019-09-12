@@ -1,12 +1,45 @@
+// This file is part of cfnts.
+// Copyright (c) 2019, Cloudflare. All rights reserved.
+// See LICENSE for licensing information.
+
 use miscreant::aead;
 use miscreant::aead::Aead;
 use rand::Rng;
+
+use std::fs::File;
+use std::io;
+use std::io::Read;
 
 pub const COOKIE_SIZE: usize = 100;
 #[derive(Debug, Copy, Clone)]
 pub struct NTSKeys {
     pub c2s: [u8; 32],
     pub s2c: [u8; 32],
+}
+
+/// Cookie key.
+#[derive(Debug)]
+pub struct CookieKey(Vec<u8>);
+
+impl CookieKey {
+    /// Parse a cookie key from a file.
+    ///
+    /// # Errors
+    ///
+    /// There will be an error, if we cannot open the file.
+    ///
+    pub fn parse(filename: &str) -> Result<CookieKey, io::Error> {
+        let mut file = File::open(filename)?;
+        let mut buffer = Vec::new();
+
+        file.read_to_end(&mut buffer)?;
+        Ok(CookieKey(buffer))
+    }
+
+    /// Return a byte slice of a cookie key content.
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_slice()
+    }
 }
 
 pub fn make_cookie(keys: NTSKeys, master_key: &[u8], key_id: &[u8; 4]) -> Vec<u8> {

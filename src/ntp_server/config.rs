@@ -6,6 +6,9 @@
 
 use std::convert::TryFrom;
 
+use sloggers::terminal::TerminalLoggerBuilder;
+use sloggers::Build;
+
 use crate::cookie::CookieKey;
 use crate::error::WrapError;
 use crate::metrics::MetricsConfig;
@@ -28,6 +31,11 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
 pub struct NtpServerConfig {
     pub addrs: Vec<String>,
     pub cookie_key: CookieKey,
+
+    /// The logger that will be used throughout the application, while the server is running.
+    /// This property is mandatory because logging is very important for debugging.
+    logger: slog::Logger,
+
     pub memcached_url: String,
     pub metrics_config: Option<MetricsConfig>,
     pub upstream_addr: Option<(String, u16)>,
@@ -46,6 +54,16 @@ impl NtpServerConfig {
     ) -> NtpServerConfig {
         NtpServerConfig {
             addrs: Vec::new(),
+
+            // Use terminal logger as a default logger. The users can override it using
+            // `set_logger` later, if they want.
+            //
+            // According to `sloggers-0.3.2` source code, the function doesn't return an error at
+            // all. There should be no problem unwrapping here.
+            logger: TerminalLoggerBuilder::new().build()
+                .expect("BUG: TerminalLoggerBuilder::build shouldn't return an error."),
+
+            // From parameters.
             cookie_key,
             memcached_url,
             metrics_config,
@@ -56,6 +74,16 @@ impl NtpServerConfig {
     /// Add an address into the config.
     pub fn add_address(&mut self, addr: String) {
         self.addrs.push(addr);
+    }
+
+    /// Set a new logger to the config.
+    pub fn set_logger(&mut self, logger: slog::Logger) {
+        self.logger = logger;
+    }
+
+    /// Return the logger of the config.
+    pub fn logger(&self) -> &slog::Logger {
+        &self.logger
     }
 
     /// Parse a config from a file.

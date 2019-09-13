@@ -203,10 +203,9 @@ fn run_server(
 
 /// start_ntp_server runs the ntp server with the config specified in config_filename
 pub fn start_ntp_server(
-    logger: &slog::Logger,
     config: NtpServerConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let logger = logger.new(slog::o!("component"=>"ntp"));
+    let logger = config.logger().clone();
 
     let mut key_rot = RotatingKeys {
         memcache_url: config.memcached_url,

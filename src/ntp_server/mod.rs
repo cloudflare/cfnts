@@ -29,11 +29,11 @@ fn resolve_config_filename<'a>(matches: &clap::ArgMatches<'a>) -> String {
 /// The entry point of `ntp-server`.
 pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
     // This should return the clone of `logger` in the main function.
-    let logger = slog_scope::logger();
+    let global_logger = slog_scope::logger();
 
     // Get the config file path.
     let filename = resolve_config_filename(&matches);
-    let config = match NtpServerConfig::parse(&filename) {
+    let mut config = match NtpServerConfig::parse(&filename) {
         Ok(val) => val,
         // If there is an error, display it.
         Err(err) => {
@@ -42,7 +42,11 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
         },
     };
 
-    if let Err(err) = start_ntp_server(&logger, config) {
+    let logger = global_logger.new(slog::o!("component" => "ntp"));
+    // Let the parsed config use the child logger of the global logger.
+    config.set_logger(logger);
+
+    if let Err(err) = start_ntp_server(config) {
         eprintln!("starting NTP server failed: {}", err);
         process::exit(1);
     }

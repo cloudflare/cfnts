@@ -16,11 +16,11 @@ mod cmd;
 mod cookie;
 mod error;
 mod ke_server;
+mod key_rotator;
 mod metrics;
 mod ntp;
 mod ntp_server;
 mod nts_ke;
-mod rotation;
 
 use sloggers::terminal::{Destination, TerminalLoggerBuilder};
 use sloggers::types::Severity;

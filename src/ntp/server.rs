@@ -2,7 +2,7 @@ use crate::cfsock;
 use crate::ntp_server::NtpServerConfig;
 use crate::cookie::{eat_cookie, get_keyid, make_cookie, NTSKeys, COOKIE_SIZE};
 use crate::metrics;
-use crate::rotation::{periodic_rotate, RotatingKeys};
+use crate::key_rotator::{periodic_rotate, KeyRotator};
 
 use lazy_static::lazy_static;
 use prometheus::{opts, register_counter, register_int_counter, IntCounter};
@@ -101,7 +101,7 @@ struct ServerState {
 /// The caller has to set up the socket options correctly
 fn run_server(
     socket: UdpSocket,
-    keys: Arc<RwLock<RotatingKeys>>,
+    keys: Arc<RwLock<KeyRotator>>,
     servstate: Arc<RwLock<ServerState>>,
     logger: slog::Logger,
     ipv4: bool,
@@ -207,8 +207,8 @@ pub fn start_ntp_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let logger = config.logger().clone();
 
-    let mut key_rot = RotatingKeys {
-        memcache_url: config.memcached_url,
+    let mut key_rot = KeyRotator {
+        memcached_url: config.memcached_url,
         prefix: "/nts/nts-keys".to_string(),
         duration: 3600,
         forward_periods: 2,
@@ -357,7 +357,7 @@ fn response(
     query: &[u8],
     r_time: SystemTime,
     t_time: SystemTime,
-    cookie_keys: Arc<RwLock<RotatingKeys>>,
+    cookie_keys: Arc<RwLock<KeyRotator>>,
     servstate: Arc<RwLock<ServerState>>,
     logger: slog::Logger,
 ) -> Result<Vec<u8>, std::io::Error> {
@@ -417,7 +417,7 @@ fn response(
 fn process_nts(
     resp_header: NtpPacketHeader,
     keys: NTSKeys,
-    cookie_keys: Arc<RwLock<RotatingKeys>>,
+    cookie_keys: Arc<RwLock<KeyRotator>>,
     query_raw: &[u8],
 ) -> Vec<u8> {
     let mut recv_aead = Aes128SivAead::new(&keys.c2s);
@@ -436,7 +436,7 @@ fn nts_response(
     query: NtsPacket,
     header: NtpPacketHeader,
     keys: NTSKeys,
-    cookie_keys: Arc<RwLock<RotatingKeys>>,
+    cookie_keys: Arc<RwLock<KeyRotator>>,
 ) -> NtsPacket {
     let mut resp_packet = NtsPacket {
         header: header,

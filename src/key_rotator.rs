@@ -26,8 +26,8 @@ lazy_static! {
 }
 pub type KeyID = [u8; 4];
 
-pub struct RotatingKeys {
-    pub memcache_url: String,
+pub struct KeyRotator {
+    pub memcached_url: String,
     pub prefix: String,
     pub duration: i64,
     pub forward_periods: i64,
@@ -66,10 +66,10 @@ impl VecMap for MemcacheVecMap {
     }
 }
 
-impl RotatingKeys {
+impl KeyRotator {
     pub fn rotate_keys(&mut self) -> Result<(), Box<std::error::Error>> {
         ROTATION_COUNTER.inc();
-        let client = memcache::Client::connect(self.memcache_url.clone())?;
+        let client = memcache::Client::connect(self.memcached_url.clone())?;
         let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
         let timestamp = now.as_secs() as i64;
         let mut vecmap = MemcacheVecMap { client: client };
@@ -93,7 +93,7 @@ impl RotatingKeys {
                 }
                 None => {
                     FAILURE_COUNTER.inc();
-                    error!(self.logger, "cannot read from memcache"; "key"=>db_loc, "memcache_url"=>self.memcache_url.clone());
+                    error!(self.logger, "cannot read from memcache"; "key"=>db_loc, "memcached_url"=>self.memcached_url.clone());
                     failed = true;
                 }
             }
@@ -124,7 +124,7 @@ impl RotatingKeys {
     }
 }
 
-pub fn periodic_rotate(rotor: Arc<RwLock<RotatingKeys>>) {
+pub fn periodic_rotate(rotor: Arc<RwLock<KeyRotator>>) {
     let mut rotor = rotor.clone();
     thread::spawn(move || loop {
         inner(&mut rotor);
@@ -133,11 +133,11 @@ pub fn periodic_rotate(rotor: Arc<RwLock<RotatingKeys>>) {
     });
 }
 
-fn inner(rotor: &mut Arc<RwLock<RotatingKeys>>) {
+fn inner(rotor: &mut Arc<RwLock<KeyRotator>>) {
     let _ = rotor.write().unwrap().rotate_keys();
 }
 
-fn read_sleep(rotor: &Arc<RwLock<RotatingKeys>>) -> i64 {
+fn read_sleep(rotor: &Arc<RwLock<KeyRotator>>) -> i64 {
     rotor.read().unwrap().duration
 }
 
@@ -178,8 +178,8 @@ mod test {
         testmap.table.insert("test/5".to_string(), None);
         testmap.table.insert("test/0".to_string(), None);
 
-        let mut test_rotor = RotatingKeys {
-            memcache_url: "unused".to_owned(),
+        let mut test_rotor = KeyRotator {
+            memcached_url: "unused".to_owned(),
             prefix: "test".to_owned(),
             duration: 1,
             forward_periods: 1,

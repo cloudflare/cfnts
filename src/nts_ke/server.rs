@@ -28,7 +28,7 @@ use crate::cfsock;
 use crate::ke_server::KeServerConfig;
 use crate::cookie::{make_cookie, NTSKeys};
 use crate::metrics;
-use crate::rotation::{periodic_rotate, RotatingKeys};
+use crate::key_rotator::{periodic_rotate, KeyRotator};
 
 use super::protocol::gen_key;
 use super::protocol::serialize_record;
@@ -48,7 +48,7 @@ lazy_static! {
 
 // response uses the configuration and the keys and computes the response
 // sent to the client.
-fn response(keys: NTSKeys, master_key: &Arc<RwLock<RotatingKeys>>, port: &u16) -> Vec<u8> {
+fn response(keys: NTSKeys, master_key: &Arc<RwLock<KeyRotator>>, port: &u16) -> Vec<u8> {
     let mut response: Vec<u8> = Vec::new();
     let mut next_proto = NtsKeRecord {
         critical: true,
@@ -131,7 +131,7 @@ struct NTSKeyServer {
     deadlines: BinaryHeap<Timeout>,
     next_id: usize,
     tls_config: Arc<rustls::ServerConfig>,
-    master_key: Arc<RwLock<RotatingKeys>>,
+    master_key: Arc<RwLock<KeyRotator>>,
     next_port: u16,
     listen_addr: std::net::SocketAddr,
     logger: slog::Logger,
@@ -144,7 +144,7 @@ impl NTSKeyServer {
     fn new(
         server: TcpListener,
         cfg: Arc<rustls::ServerConfig>,
-        master_key: Arc<RwLock<RotatingKeys>>,
+        master_key: Arc<RwLock<KeyRotator>>,
         next_port: u16,
         listen_addr: std::net::SocketAddr,
         logger: slog::Logger,
@@ -311,7 +311,7 @@ struct Connection {
     closed: bool,
     sent_response: bool,
     tls_session: rustls::ServerSession,
-    master_key: Arc<RwLock<RotatingKeys>>,
+    master_key: Arc<RwLock<KeyRotator>>,
     next_port: u16,
     logger: slog::Logger,
 }
@@ -321,7 +321,7 @@ impl Connection {
         socket: TcpStream,
         token: mio::Token,
         tls_session: rustls::ServerSession,
-        master_key: Arc<RwLock<RotatingKeys>>,
+        master_key: Arc<RwLock<KeyRotator>>,
         port: u16,
         logger: slog::Logger,
     ) -> Connection {
@@ -493,8 +493,8 @@ pub fn start_nts_ke_server(
 ) -> Result<(), Box<std::error::Error>> {
     let logger = config.logger();
     // First parse config for TLS server using local config module.
-    let mut key_rot = RotatingKeys {
-        memcache_url: config.memcached_url.clone(),
+    let mut key_rot = KeyRotator {
+        memcached_url: config.memcached_url.clone(),
         prefix: "/nts/nts-keys".to_string(),
         duration: 3600,
         forward_periods: 2,
@@ -535,7 +535,7 @@ pub fn start_nts_ke_server(
 
 fn run_server_loop(
     parsed_config: KeServerConfig,
-    keys: Arc<RwLock<RotatingKeys>>,
+    keys: Arc<RwLock<KeyRotator>>,
 ) -> Result<(), Box<std::error::Error>> {
     let logger = parsed_config.logger().clone();
     let mut server_config = ServerConfig::new(NoClientAuth::new());

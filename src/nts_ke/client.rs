@@ -14,8 +14,8 @@ use super::protocol;
 use super::protocol::{DeserializeError::TooShort, *};
 
 use self::ClientError::*;
+use crate::client::ClientConfig;
 use crate::cookie::NTSKeys;
-use crate::config::ConfigNTSClient;
 
 type Cookie = Vec<u8>;
 
@@ -102,7 +102,7 @@ fn process_record(
 /// run_nts_client executes the nts client with the config in config file
 pub fn run_nts_ke_client(
     logger: &slog::Logger,
-    client_config: ConfigNTSClient
+    client_config: ClientConfig
 ) -> Result<NtsKeResult, Box<dyn Error>> {
     let mut tls_config = rustls::ClientConfig::new();
     let alpn_proto = String::from("ntske/1");

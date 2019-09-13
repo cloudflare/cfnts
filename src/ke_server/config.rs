@@ -35,7 +35,7 @@ pub struct Config {
     pub cookie_key: CookieKey,
     pub conn_timeout: Option<u64>,
     pub memcached_url: String,
-    pub metrics: Option<MetricsConfig>,
+    pub metrics_config: Option<MetricsConfig>,
     pub next_port: u16,
     pub tls_certs: Vec<Certificate>,
     pub tls_secret_keys: Vec<PrivateKey>,
@@ -50,7 +50,7 @@ impl Config {
         conn_timeout: Option<u64>,
         cookie_key: CookieKey,
         memcached_url: String,
-        metrics: Option<MetricsConfig>,
+        metrics_config: Option<MetricsConfig>,
         next_port: u16,
     ) -> Config {
         Config {
@@ -61,7 +61,7 @@ impl Config {
             next_port,
             conn_timeout,
             memcached_url,
-            metrics,
+            metrics_config,
         }
     }
 

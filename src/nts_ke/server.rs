@@ -521,7 +521,7 @@ pub fn start_nts_ke_server(
     periodic_rotate(keys.clone());
 
     // Now we initialize metrics
-    if let Some(metrics_config) = config.metrics.clone() {
+    if let Some(metrics_config) = config.metrics_config.clone() {
         let metrics = metrics_config.clone();
         info!(logger, "spawning metrics");
         let log_metrics = logger.new(slog::o!("component"=>"metrics"));

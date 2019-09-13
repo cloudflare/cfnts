@@ -13,7 +13,6 @@ extern crate sloggers;
 mod cfsock;
 mod client;
 mod cmd;
-mod config;
 mod cookie;
 mod error;
 mod ke_server;

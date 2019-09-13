@@ -12,8 +12,8 @@ use std::fs::File;
 use std::io;
 
 use crate::cookie::CookieKey;
-use crate::config::MetricsConfig;
 use crate::error::WrapError;
+use crate::metrics::MetricsConfig;
 
 fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
     let mut metrics = None;

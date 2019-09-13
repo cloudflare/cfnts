@@ -10,7 +10,11 @@ use std::thread;
 
 use slog::{error};
 
-use crate::config;
+#[derive(Clone, Debug)]
+pub struct MetricsConfig {
+    pub port: u16,
+    pub addr: String,
+}
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -44,7 +48,7 @@ fn serve_metrics(mut dest: net::TcpStream, logger: slog::Logger) -> () {
 }
 
 /// Runs the metric server on the address and port set in config
-pub fn run_metrics(conf: config::MetricsConfig,
+pub fn run_metrics(conf: MetricsConfig,
                    logger: &slog::Logger) -> Result<(), std::io::Error> {
     VERSION_INFO.set(1);
     let accept = net::TcpListener::bind((conf.addr.as_str(), conf.port))?;

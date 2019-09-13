@@ -1,5 +1,5 @@
 use crate::cfsock;
-use crate::config::ConfigNTP;
+use crate::ntp_server::NtpServerConfig;
 use crate::cookie::{eat_cookie, get_keyid, make_cookie, NTSKeys, COOKIE_SIZE};
 use crate::metrics;
 use crate::rotation::{periodic_rotate, RotatingKeys};
@@ -204,7 +204,7 @@ fn run_server(
 /// start_ntp_server runs the ntp server with the config specified in config_filename
 pub fn start_ntp_server(
     logger: &slog::Logger,
-    config: ConfigNTP,
+    config: NtpServerConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let logger = logger.new(slog::o!("component"=>"ntp"));
 
@@ -214,7 +214,7 @@ pub fn start_ntp_server(
         duration: 3600,
         forward_periods: 2,
         backward_periods: 24,
-        master_key: config.cookie_key,
+        master_key: Vec::from(config.cookie_key.as_bytes()),
         latest: [0; 4],
         keys: HashMap::new(),
         logger: logger.clone(),

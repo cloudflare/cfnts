@@ -493,20 +493,15 @@ pub fn start_nts_ke_server(
 ) -> Result<(), Box<std::error::Error>> {
     let logger = config.logger();
     // First parse config for TLS server using local config module.
-    let mut key_rot = KeyRotator {
-        memcached_url: config.memcached_url.clone(),
-        prefix: "/nts/nts-keys".to_string(),
-        duration: 3600,
-        forward_periods: 2,
-        backward_periods: 24,
-        master_key: Vec::from(config.cookie_key.as_bytes()),
-        latest: [0; 4],
-        keys: HashMap::new(),
-        logger: logger.clone(),
-    };
+    let mut key_rotator = KeyRotator::new(
+        String::from("/nts/nts-keys"), // prefix
+        config.memcached_url.clone(), // memcached_url
+        config.cookie_key.clone(), // master_key
+        logger.clone(), // logger
+    );
     info!(logger, "Initializing keys with memcached");
     loop {
-        let res = key_rot.rotate_keys();
+        let res = key_rotator.rotate_keys();
         match res {
             Err(e) => {
                 ERROR_COUNTER.inc();
@@ -516,7 +511,7 @@ pub fn start_nts_ke_server(
             Ok(()) => break,
         }
     }
-    let keys = Arc::new(RwLock::new(key_rot));
+    let keys = Arc::new(RwLock::new(key_rotator));
     periodic_rotate(keys.clone());
 
     // Now we initialize metrics

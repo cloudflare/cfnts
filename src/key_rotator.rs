@@ -15,6 +15,8 @@ use slog::{error};
 use ring::digest;
 use ring::hmac;
 
+use crate::cookie::CookieKey;
+
 lazy_static! {
     static ref ROTATION_COUNTER: IntCounter =
         register_int_counter!("ntp_key_rotations_total", "Number of key rotations").unwrap();
@@ -24,17 +26,17 @@ lazy_static! {
     )
     .unwrap();
 }
-pub type KeyID = [u8; 4];
+pub type KeyId = [u8; 4];
 
 pub struct KeyRotator {
     pub memcached_url: String,
     pub prefix: String,
     pub duration: i64,
-    pub forward_periods: i64,
-    pub backward_periods: i64,
-    pub master_key: Vec<u8>,
-    pub latest: KeyID,
-    pub keys: HashMap<KeyID, Vec<u8>>,
+    pub number_of_forward_periods: i64,
+    pub number_of_backward_periods: i64,
+    pub master_key: CookieKey,
+    pub latest: KeyId,
+    pub keys: HashMap<KeyId, Vec<u8>>,
     pub logger: slog::Logger,
 }
 
@@ -67,6 +69,31 @@ impl VecMap for MemcacheVecMap {
 }
 
 impl KeyRotator {
+    /// Create a `KeyRotator` instance with the given parameters.
+    pub fn new(
+        prefix: String,
+        memcached_url: String,
+        master_key: CookieKey,
+        logger: slog::Logger,
+    ) -> KeyRotator {
+        KeyRotator {
+            latest: [0; 4],
+            keys: HashMap::new(),
+
+            // It seems that currently we don't have to customize the following three properties,
+            // so I will just put default values.
+            duration: 3600,
+            number_of_forward_periods: 2,
+            number_of_backward_periods: 24,
+
+            // From parameters.
+            prefix,
+            memcached_url,
+            master_key,
+            logger,
+        }
+    }
+
     pub fn rotate_keys(&mut self) -> Result<(), Box<std::error::Error>> {
         ROTATION_COUNTER.inc();
         let client = memcache::Client::connect(self.memcached_url.clone())?;
@@ -82,7 +109,7 @@ impl KeyRotator {
         timestamp: i64,
     ) -> Result<(), Box<std::error::Error>> {
         let mut failed = false;
-        for i in -self.backward_periods..(self.forward_periods + 1) {
+        for i in -self.number_of_backward_periods..(self.number_of_forward_periods + 1) {
             let epoch = self.epoch(timestamp, i);
             let db_loc = format!("{}/{}", self.prefix, epoch);
             let db_val = client.get(&db_loc)?;
@@ -99,7 +126,7 @@ impl KeyRotator {
             }
         }
         self.keys
-            .remove(&be_bytes(self.epoch(timestamp, -self.backward_periods - 1)));
+            .remove(&be_bytes(self.epoch(timestamp, -self.number_of_backward_periods - 1)));
         self.latest = be_bytes(self.epoch(timestamp, 0)); // Not all of our friends may have gotten the same forwards keys as we did
         if failed {
             return Err(
@@ -111,7 +138,7 @@ impl KeyRotator {
     }
 
     fn compute_wrap(&self, val: Vec<u8>) -> Vec<u8> {
-        let key = hmac::SigningKey::new(&digest::SHA256, &self.master_key);
+        let key = hmac::SigningKey::new(&digest::SHA256, self.master_key.as_bytes());
         hmac::sign(&key, &val).as_ref().to_vec()
     }
 
@@ -119,7 +146,7 @@ impl KeyRotator {
         ((seconds / self.duration) + offset) * self.duration
     }
 
-    pub fn latest(&self) -> (KeyID, Vec<u8>) {
+    pub fn latest(&self) -> (KeyId, Vec<u8>) {
         (self.latest, self.keys[&self.latest].clone())
     }
 }
@@ -182,8 +209,8 @@ mod test {
             memcached_url: "unused".to_owned(),
             prefix: "test".to_owned(),
             duration: 1,
-            forward_periods: 1,
-            backward_periods: 1,
+            number_of_forward_periods: 1,
+            number_of_backward_periods: 1,
             master_key: vec![0, 32],
             latest: [1, 2, 3, 4],
             keys: HashMap::new(),

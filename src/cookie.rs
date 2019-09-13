@@ -18,7 +18,7 @@ pub struct NTSKeys {
 }
 
 /// Cookie key.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct CookieKey(Vec<u8>);
 
 impl CookieKey {

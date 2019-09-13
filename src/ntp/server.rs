@@ -8,7 +8,6 @@ use lazy_static::lazy_static;
 use prometheus::{opts, register_counter, register_int_counter, IntCounter};
 use slog::{error, info};
 
-use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::net::{
     SocketAddr::{V6},
@@ -207,20 +206,15 @@ pub fn start_ntp_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let logger = config.logger().clone();
 
-    let mut key_rot = KeyRotator {
-        memcached_url: config.memcached_url,
-        prefix: "/nts/nts-keys".to_string(),
-        duration: 3600,
-        forward_periods: 2,
-        backward_periods: 24,
-        master_key: Vec::from(config.cookie_key.as_bytes()),
-        latest: [0; 4],
-        keys: HashMap::new(),
-        logger: logger.clone(),
-    };
+    let mut key_rotator = KeyRotator::new(
+        String::from("/nts/nts-keys"), // prefix
+        config.memcached_url, // memcached_url
+        config.cookie_key, // master_key
+        logger.clone(), // logger
+    );
     info!(logger, "Initializing keys with memcached");
     loop {
-        let res = key_rot.rotate_keys();
+        let res = key_rotator.rotate_keys();
         match res {
             Err(e) => {
                 error!(logger, "Failure to initialize key rotation: {:?}", e);
@@ -229,7 +223,7 @@ pub fn start_ntp_server(
             Ok(()) => break,
         }
     }
-    let keys = Arc::new(RwLock::new(key_rot));
+    let keys = Arc::new(RwLock::new(key_rotator));
     periodic_rotate(keys.clone());
 
     let servstate_struct = ServerState {

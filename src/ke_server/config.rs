@@ -7,6 +7,9 @@
 use rustls::{Certificate, PrivateKey};
 use rustls::internal::pemfile;
 
+use sloggers::terminal::TerminalLoggerBuilder;
+use sloggers::Build;
+
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io;
@@ -34,6 +37,11 @@ pub struct KeServerConfig {
     pub addrs: Vec<String>,
     pub cookie_key: CookieKey,
     pub conn_timeout: Option<u64>,
+
+    /// The logger that will be used throughout the application, while the server is running.
+    /// This property is mandatory because logging is very important for debugging.
+    logger: slog::Logger,
+
     pub memcached_url: String,
     pub metrics_config: Option<MetricsConfig>,
     pub next_port: u16,
@@ -54,14 +62,25 @@ impl KeServerConfig {
         next_port: u16,
     ) -> KeServerConfig {
         KeServerConfig {
+            addrs: Vec::new(),
+
+            // Use terminal logger as a default logger. The users can override it using
+            // `set_logger` later, if they want.
+            //
+            // According to `sloggers-0.3.2` source code, the function doesn't return an error at
+            // all. There should be no problem unwrapping here.
+            logger: TerminalLoggerBuilder::new().build()
+                .expect("BUG: TerminalLoggerBuilder::build shouldn't return an error."),
+
             tls_certs: Vec::new(),
             tls_secret_keys: Vec::new(),
+
+            // From parameters.
             cookie_key,
-            addrs: Vec::new(),
-            next_port,
             conn_timeout,
             memcached_url,
             metrics_config,
+            next_port,
         }
     }
 
@@ -82,6 +101,16 @@ impl KeServerConfig {
     /// Add an address into the config.
     pub fn add_address(&mut self, addr: String) {
         self.addrs.push(addr);
+    }
+
+    /// Set a new logger to the config.
+    pub fn set_logger(&mut self, logger: slog::Logger) {
+        self.logger = logger;
+    }
+
+    /// Return the logger of the config.
+    pub fn logger(&self) -> &slog::Logger {
+        &self.logger
     }
 
     /// Import TLS certificates from a file.

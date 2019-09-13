@@ -489,10 +489,9 @@ fn pipewrite(wr: RawFd, logger: slog::Logger) {
 
 /// start_nts_ke_server reads the configuration and starts the server.
 pub fn start_nts_ke_server(
-    start_logger: &slog::Logger,
     config: KeServerConfig,
 ) -> Result<(), Box<std::error::Error>> {
-    let logger = start_logger.new(slog::o!("component"=>"nts_ke"));
+    let logger = config.logger();
     // First parse config for TLS server using local config module.
     let mut key_rot = RotatingKeys {
         memcache_url: config.memcached_url.clone(),
@@ -531,14 +530,14 @@ pub fn start_nts_ke_server(
         });
     }
     // Time to actually run the server
-    run_server_loop(config, &logger, keys)
+    run_server_loop(config, keys)
 }
 
 fn run_server_loop(
     parsed_config: KeServerConfig,
-    logger: &slog::Logger,
     keys: Arc<RwLock<RotatingKeys>>,
 ) -> Result<(), Box<std::error::Error>> {
+    let logger = parsed_config.logger().clone();
     let mut server_config = ServerConfig::new(NoClientAuth::new());
     server_config.versions = vec![ProtocolVersion::TLSv1_3];
     let alpn_proto = String::from("ntske/1");

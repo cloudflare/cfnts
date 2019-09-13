@@ -1,9 +1,14 @@
+// This file is part of cfnts.
+// Copyright (c) 2019, Cloudflare. All rights reserved.
+// See LICENSE for licensing information.
+
+//! Key rotator.
+
 use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use memcache;
 use memcache::MemcacheError;
@@ -94,10 +99,16 @@ impl KeyRotator {
         }
     }
 
-    pub fn rotate_keys(&mut self) -> Result<(), Box<std::error::Error>> {
+    /// Rotate keys.
+    pub fn rotate(&mut self) -> Result<(), Box<std::error::Error>> {
+        // Side-effect. It's not related to the operation.
         ROTATION_COUNTER.inc();
-        let client = memcache::Client::connect(self.memcached_url.clone())?;
-        let now = SystemTime::now().duration_since(std::time::UNIX_EPOCH)?;
+
+        // Connecting to memcached. I have to add [..] because it seems that Rust is not smart
+        // enough to do auto-dereference.
+        let client = memcache::Client::connect(&self.memcached_url[..])?;
+
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
         let timestamp = now.as_secs() as i64;
         let mut vecmap = MemcacheVecMap { client: client };
         self.internal_rotate(&mut vecmap, timestamp)
@@ -156,12 +167,12 @@ pub fn periodic_rotate(rotor: Arc<RwLock<KeyRotator>>) {
     thread::spawn(move || loop {
         inner(&mut rotor);
         let restlen = read_sleep(&rotor);
-        thread::sleep(time::Duration::from_secs(restlen as u64));
+        thread::sleep(Duration::from_secs(restlen as u64));
     });
 }
 
 fn inner(rotor: &mut Arc<RwLock<KeyRotator>>) {
-    let _ = rotor.write().unwrap().rotate_keys();
+    let _ = rotor.write().unwrap().rotate();
 }
 
 fn read_sleep(rotor: &Arc<RwLock<KeyRotator>>) -> i64 {

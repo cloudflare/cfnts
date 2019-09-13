@@ -492,16 +492,18 @@ pub fn start_nts_ke_server(
     config: KeServerConfig,
 ) -> Result<(), Box<std::error::Error>> {
     let logger = config.logger();
-    // First parse config for TLS server using local config module.
+
     let mut key_rotator = KeyRotator::new(
         String::from("/nts/nts-keys"), // prefix
         config.memcached_url.clone(), // memcached_url
         config.cookie_key.clone(), // master_key
         logger.clone(), // logger
     );
+
     info!(logger, "Initializing keys with memcached");
+
     loop {
-        let res = key_rotator.rotate_keys();
+        let res = key_rotator.rotate();
         match res {
             Err(e) => {
                 ERROR_COUNTER.inc();

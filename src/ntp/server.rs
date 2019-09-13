@@ -214,7 +214,7 @@ pub fn start_ntp_server(
     );
     info!(logger, "Initializing keys with memcached");
     loop {
-        let res = key_rotator.rotate_keys();
+        let res = key_rotator.rotate();
         match res {
             Err(e) => {
                 error!(logger, "Failure to initialize key rotation: {:?}", e);

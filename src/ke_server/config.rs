@@ -30,7 +30,7 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
 
 /// Configuration for running an NTS-KE server.
 #[derive(Debug)]
-pub struct Config {
+pub struct KeServerConfig {
     pub addrs: Vec<String>,
     pub cookie_key: CookieKey,
     pub conn_timeout: Option<u64>,
@@ -41,9 +41,9 @@ pub struct Config {
     pub tls_secret_keys: Vec<PrivateKey>,
 }
 
-/// We decided to make Config mutable so that you can add more cert, private key, or address after
-/// you parse the config file.
-impl Config {
+/// We decided to make KeServerConfig mutable so that you can add more cert, private key, or
+/// address after you parse the config file.
+impl KeServerConfig {
     /// Create a NTS-KE server config object with the given next port, memcached url, connection
     /// timeout, and the metrics config.
     pub fn new(
@@ -52,8 +52,8 @@ impl Config {
         memcached_url: String,
         metrics_config: Option<MetricsConfig>,
         next_port: u16,
-    ) -> Config {
-        Config {
+    ) -> KeServerConfig {
+        KeServerConfig {
             tls_certs: Vec::new(),
             tls_secret_keys: Vec::new(),
             cookie_key,
@@ -170,7 +170,7 @@ impl Config {
     ///
     // Returning a `Message` object here is not a good practice. I will figure out a good practice
     // later.
-    pub fn parse(filename: &str) -> Result<Config, config::ConfigError> {
+    pub fn parse(filename: &str) -> Result<KeServerConfig, config::ConfigError> {
         let mut settings = config::Config::new();
         settings.merge(config::File::with_name(filename))?;
 
@@ -231,7 +231,7 @@ impl Config {
         let cookie_key_filename = settings.get_str("cookie_key_file")?;
         let cookie_key = CookieKey::parse(&cookie_key_filename).wrap_err()?;
 
-        let mut config = Config::new(
+        let mut config = KeServerConfig::new(
             conn_timeout,
             cookie_key,
             memcached_url,

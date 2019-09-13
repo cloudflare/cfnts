@@ -166,7 +166,7 @@ impl KeServerConfig {
     /// following cases:
     ///
     /// * The next port in the configuration file is a valid `i64` but not a valid `u16`.
-    /// * The connection in the configuration file is a valid `i64` but not a valid `u64`.
+    /// * The connection timeout in the configuration file is a valid `i64` but not a valid `u64`.
     ///
     // Returning a `Message` object here is not a good practice. I will figure out a good practice
     // later.

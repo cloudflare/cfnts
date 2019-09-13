@@ -25,7 +25,7 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
 
 /// Configuration for running an NTP server.
 #[derive(Debug)]
-pub struct Config {
+pub struct NtpServerConfig {
     pub addrs: Vec<String>,
     pub cookie_key: CookieKey,
     pub memcached_url: String,
@@ -33,9 +33,9 @@ pub struct Config {
     pub upstream_addr: Option<(String, u16)>,
 }
 
-/// We decided to make Config mutable so that you can add more address after you parse the config
-/// file.
-impl Config {
+/// We decided to make NtpServerConfig mutable so that you can add more address after you parse
+/// the config file.
+impl NtpServerConfig {
     /// Create a NTP server config object with the given next port, memcached url, connection
     /// timeout, and the metrics config.
     pub fn new(
@@ -43,8 +43,8 @@ impl Config {
         memcached_url: String,
         metrics_config: Option<MetricsConfig>,
         upstream_addr: Option<(String, u16)>,
-    ) -> Config {
-        Config {
+    ) -> NtpServerConfig {
+        NtpServerConfig {
             addrs: Vec::new(),
             cookie_key,
             memcached_url,
@@ -75,7 +75,7 @@ impl Config {
     ///
     // Returning a `Message` object here is not a good practice. I will figure out a good practice
     // later.
-    pub fn parse(filename: &str) -> Result<Config, config::ConfigError> {
+    pub fn parse(filename: &str) -> Result<NtpServerConfig, config::ConfigError> {
         let mut settings = config::Config::new();
         settings.merge(config::File::with_name(filename))?;
 
@@ -134,7 +134,7 @@ impl Config {
         let cookie_key_filename = settings.get_str("cookie_key_file")?;
         let cookie_key = CookieKey::parse(&cookie_key_filename).wrap_err()?;
 
-        let mut config = Config::new(
+        let mut config = NtpServerConfig::new(
             cookie_key,
             memcached_url,
             metrics_config,

@@ -6,7 +6,7 @@
 
 mod config;
 
-pub use self::config::{Config as NtpServerConfig};
+pub use self::config::NtpServerConfig;
 
 use std::process;
 
@@ -33,7 +33,7 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
 
     // Get the config file path.
     let filename = resolve_config_filename(&matches);
-    let config = match config::Config::parse(&filename) {
+    let config = match NtpServerConfig::parse(&filename) {
         Ok(val) => val,
         // If there is an error, display it.
         Err(err) => {

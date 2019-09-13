@@ -266,7 +266,7 @@ pub fn start_ntp_server(
         }
     }
 
-    if let Some(metrics_config) = config.metrics {
+    if let Some(metrics_config) = config.metrics_config {
         let metrics = metrics_config.clone();
         info!(logger, "spawning metrics");
         let log_metrics = logger.new(slog::o!("component"=>"metrics"));

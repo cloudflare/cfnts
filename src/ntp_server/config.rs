@@ -29,7 +29,7 @@ pub struct Config {
     pub addrs: Vec<String>,
     pub cookie_key: CookieKey,
     pub memcached_url: String,
-    pub metrics: Option<MetricsConfig>,
+    pub metrics_config: Option<MetricsConfig>,
     pub upstream_addr: Option<(String, u16)>,
 }
 
@@ -41,14 +41,14 @@ impl Config {
     pub fn new(
         cookie_key: CookieKey,
         memcached_url: String,
-        metrics: Option<MetricsConfig>,
+        metrics_config: Option<MetricsConfig>,
         upstream_addr: Option<(String, u16)>,
     ) -> Config {
         Config {
             addrs: Vec::new(),
             cookie_key,
             memcached_url,
-            metrics,
+            metrics_config,
             upstream_addr,
         }
     }

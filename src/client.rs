@@ -80,8 +80,8 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
 
     match res {
         Err(err) => {
-            eprintln!("failure of tls stage {:?}", err);
-            process::exit(125)
+            eprintln!("failure of tls stage: {}", err);
+            process::exit(1)
         }
         Ok(_) => {}
     }
@@ -90,13 +90,12 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
     let res = run_nts_ntp_client(&logger, state);
     match res {
         Err(err) => {
-            eprintln!("Failure of client {:?}", err);
-            process::exit(126)
+            eprintln!("failure of client: {}", err);
+            process::exit(1)
         }
         Ok(result) => {
             println!("stratum: {:}", result.stratum);
             println!("offset: {:.6}", result.time_diff);
-            process::exit(0)
         }
     }
 }

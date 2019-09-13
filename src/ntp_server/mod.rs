@@ -33,10 +33,17 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
 
     // Get the config file path.
     let filename = resolve_config_filename(&matches);
-    let config = config::Config::parse(&filename).unwrap();
+    let config = match config::Config::parse(&filename) {
+        Ok(val) => val,
+        // If there is an error, display it.
+        Err(err) => {
+            eprintln!("{}", err);
+            process::exit(1);
+        },
+    };
 
     if let Err(err) = start_ntp_server(&logger, config) {
-        eprintln!("Starting NTP server failed: {:?}", err);
-        process::exit(126);
+        eprintln!("starting NTP server failed: {}", err);
+        process::exit(1);
     }
 }

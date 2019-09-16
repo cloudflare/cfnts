@@ -35,14 +35,20 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
 #[derive(Debug)]
 pub struct KeServerConfig {
     pub addrs: Vec<String>,
-    pub cookie_key: CookieKey,
+
+    /// The initial cookie key for the NTS-KE server.
+    cookie_key: CookieKey,
+
     pub conn_timeout: Option<u64>,
 
     /// The logger that will be used throughout the application, while the server is running.
     /// This property is mandatory because logging is very important for debugging.
     logger: slog::Logger,
 
-    pub memcached_url: String,
+    /// The url of the memcached server. The memcached server is used to sync data between the
+    /// NTS-KE server and the NTP server.
+    memcached_url: String,
+
     pub metrics_config: Option<MetricsConfig>,
     pub next_port: u16,
     pub tls_certs: Vec<Certificate>,
@@ -103,6 +109,11 @@ impl KeServerConfig {
         self.addrs.push(addr);
     }
 
+    /// Return the cookie key of the config.
+    pub fn cookie_key(&self) -> &CookieKey {
+        &self.cookie_key
+    }
+
     /// Set a new logger to the config.
     pub fn set_logger(&mut self, logger: slog::Logger) {
         self.logger = logger;
@@ -111,6 +122,11 @@ impl KeServerConfig {
     /// Return the logger of the config.
     pub fn logger(&self) -> &slog::Logger {
         &self.logger
+    }
+
+    /// Return the memcached url of the config.
+    pub fn memcached_url(&self) -> &str {
+        &self.memcached_url
     }
 
     /// Import TLS certificates from a file.

@@ -495,8 +495,8 @@ pub fn start_nts_ke_server(
 
     let mut key_rotator = KeyRotator::new(
         String::from("/nts/nts-keys"), // prefix
-        config.memcached_url.clone(), // memcached_url
-        config.cookie_key.clone(), // master_key
+        String::from(config.memcached_url()), // memcached_url
+        config.cookie_key().clone(), // master_key
         logger.clone(), // logger
     );
 

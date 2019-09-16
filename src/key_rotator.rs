@@ -36,20 +36,26 @@ pub type KeyId = [u8; 4];
 pub struct KeyRotator {
     pub memcached_url: String,
     pub prefix: String,
-    pub duration: i64,
-    pub number_of_forward_periods: i64,
-    pub number_of_backward_periods: i64,
+
+    // This property type needs to fit an Epoch time in seconds.
+    pub duration: u64,
+
+    // The number of forward and backward periods are `u64` because the timestamp is `u64` and the
+    // duration can be as small as 1.
+    pub number_of_forward_periods: u64,
+    pub number_of_backward_periods: u64,
+
     pub master_key: CookieKey,
     pub latest: KeyId,
     pub keys: HashMap<KeyId, Vec<u8>>,
     pub logger: slog::Logger,
 }
 
-/// This function writes a i64 as 4 bytes in big endian.
+/// This function writes a u64 as 4 bytes in big endian.
 /// Since we are using timestamps we are fine with 4 bytes.
 /// Rollover doesn't matter here since we don't have 38 years worth
 /// of cookies.
-fn be_bytes(n: i64) -> [u8; 4] {
+fn be_bytes(n: u64) -> [u8; 4] {
     let mut ret: [u8; 4] = [0; 4];
     let mut u = n as u32;
     for i in 0..3 {
@@ -108,37 +114,58 @@ impl KeyRotator {
         // enough to do auto-dereference.
         let client = memcache::Client::connect(&self.memcached_url[..])?;
 
-        let now = SystemTime::now().duration_since(UNIX_EPOCH)?;
-        let timestamp = now.as_secs() as i64;
+        let duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
+        // The number of seconds since the Epoch time.
+        let timestamp = duration.as_secs();
+
         let mut vecmap = MemcacheVecMap { client: client };
         self.internal_rotate(&mut vecmap, timestamp)
     }
 
-    fn internal_rotate(
-        &mut self,
-        client: &mut dyn VecMap,
-        timestamp: i64,
-    ) -> Result<(), Box<std::error::Error>> {
+    fn internal_rotate(&mut self, client: &mut dyn VecMap, timestamp: u64)
+        -> Result<(), Box<std::error::Error>>
+    {
+        // The current period number of the timestamp.
+        let current_period = timestamp / self.duration;
+        // The timestamp at the beginning of the current period.
+        let current_epoch = current_period * self.duration;
+
+        // The first period number that we want to iterate through.
+        let first_period = current_period - self.number_of_backward_periods;
+
+        // The last period number that we want to iterate through.
+        let last_period = current_period + self.number_of_forward_periods;
+
         let mut failed = false;
-        for i in -self.number_of_backward_periods..(self.number_of_forward_periods + 1) {
-            let epoch = self.epoch(timestamp, i);
-            let db_loc = format!("{}/{}", self.prefix, epoch);
-            let db_val = client.get(&db_loc)?;
+
+        for period_number in first_period..=last_period {
+            // The timestamp at the beginning of the period.
+            let epoch = period_number * self.duration;
+
+            let memcached_key = format!("{}/{}", self.prefix, period_number);
+            let memcached_value = client.get(&memcached_key)?;
+
             let key_id = be_bytes(epoch);
-            match db_val {
+            match memcached_value {
                 Some(s) => {
                     self.keys.insert(key_id, self.compute_wrap(s));
                 }
                 None => {
                     FAILURE_COUNTER.inc();
-                    error!(self.logger, "cannot read from memcache"; "key"=>db_loc, "memcached_url"=>self.memcached_url.clone());
+                    error!(self.logger, "cannot read from memcache";
+                           "key" => memcached_key,
+                           "memcached_url" => self.memcached_url.clone());
                     failed = true;
                 }
             }
         }
-        self.keys
-            .remove(&be_bytes(self.epoch(timestamp, -self.number_of_backward_periods - 1)));
-        self.latest = be_bytes(self.epoch(timestamp, 0)); // Not all of our friends may have gotten the same forwards keys as we did
+        // removed_period shouldn't be negative because first_period shouldn't be zero.
+        let removed_period = first_period - 1;
+        let removed_epoch = removed_period * self.duration;
+        self.keys.remove(&be_bytes(removed_epoch));
+
+        // Not all of our friends may have gotten the same forwards keys as we did
+        self.latest = be_bytes(current_epoch);
         if failed {
             return Err(
                 io::Error::new(io::ErrorKind::Other, "A request to memcached failed").into(),
@@ -151,10 +178,6 @@ impl KeyRotator {
     fn compute_wrap(&self, val: Vec<u8>) -> Vec<u8> {
         let key = hmac::SigningKey::new(&digest::SHA256, self.master_key.as_bytes());
         hmac::sign(&key, &val).as_ref().to_vec()
-    }
-
-    fn epoch(&self, seconds: i64, offset: i64) -> i64 {
-        ((seconds / self.duration) + offset) * self.duration
     }
 
     pub fn latest(&self) -> (KeyId, Vec<u8>) {
@@ -175,7 +198,7 @@ fn inner(rotor: &mut Arc<RwLock<KeyRotator>>) {
     let _ = rotor.write().unwrap().rotate();
 }
 
-fn read_sleep(rotor: &Arc<RwLock<KeyRotator>>) -> i64 {
+fn read_sleep(rotor: &Arc<RwLock<KeyRotator>>) -> u64 {
     rotor.read().unwrap().duration
 }
 

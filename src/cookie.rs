@@ -45,6 +45,14 @@ impl CookieKey {
     }
 }
 
+// Only used in test.
+#[cfg(test)]
+impl From<&[u8]> for CookieKey {
+    fn from(bytes: &[u8]) -> CookieKey {
+        CookieKey(Vec::from(bytes))
+    }
+}
+
 pub fn make_cookie(keys: NTSKeys, master_key: &[u8], key_id: KeyId) -> Vec<u8> {
     let mut nonce = [0; 16];
     rand::thread_rng().fill(&mut nonce);
@@ -120,7 +128,7 @@ mod tests {
         };
 
         let master_key = [0x07; 32];
-        let key_id = [0x03; 4];
+        let key_id = KeyId::from_be_bytes([0x03; 4]);
         let mut cookie = make_cookie(test, &master_key, key_id);
         let ret = get_keyid(&cookie);
 

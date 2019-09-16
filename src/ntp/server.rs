@@ -370,10 +370,10 @@ fn response(
         match keyid_maybe {
             Some(keyid) => {
                 let point = cookie_keys.read().unwrap();
-                let key_maybe = (*point).keys.get(&keyid);
+                let key_maybe = (*point).get(keyid);
                 match key_maybe {
                     Some(key) => {
-                        let nts_keys = eat_cookie(&cookie.contents, key);
+                        let nts_keys = eat_cookie(&cookie.contents, key.as_ref());
                         match nts_keys {
                             Some(nts_dir_keys) => {
                                 Ok(process_nts(
@@ -444,8 +444,8 @@ fn nts_response(
                 if ext.contents.len() >= COOKIE_SIZE {
                     // Avoid amplification
                     let keymaker = cookie_keys.read().unwrap();
-                    let (id, curr_key) = keymaker.latest();
-                    let cookie = make_cookie(keys, &curr_key, id);
+                    let (key_id, curr_key) = keymaker.latest_key_value();
+                    let cookie = make_cookie(keys, curr_key.as_ref(), key_id);
                     resp_packet.auth_enc_exts.push(NtpExtension {
                         ext_type: NTSCookie,
                         contents: cookie,
@@ -456,8 +456,9 @@ fn nts_response(
         }
     }
     // This is a free cookie to replace the one consumed in the packet
-    let (id, curr_key) = cookie_keys.read().unwrap().latest();
-    let cookie = make_cookie(keys, &curr_key, id);
+    let keymaker = cookie_keys.read().unwrap();
+    let (key_id, curr_key) = keymaker.latest_key_value();
+    let cookie = make_cookie(keys, curr_key.as_ref(), key_id);
     resp_packet.auth_enc_exts.push(NtpExtension {
         ext_type: NTSCookie,
         contents: cookie,

@@ -2,23 +2,24 @@
 // Copyright (c) 2019, Cloudflare. All rights reserved.
 // See LICENSE for licensing information.
 
-//! Key rotator.
-
-use std::collections::HashMap;
-use std::io;
-use std::sync::{Arc, RwLock};
-use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-use memcache;
-use memcache::MemcacheError;
+//! Key rotator implementation, which provides key synchronization with Memcached server.
 
 use lazy_static::lazy_static;
+
+#[cfg(not(test))]
+use memcache::MemcacheError;
+
 use prometheus::{opts, register_counter, register_int_counter, IntCounter};
-use slog::{error};
 
 use ring::digest;
 use ring::hmac;
+
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::thread;
+use std::time::{Duration, UNIX_EPOCH};
+#[cfg(not(test))]
+use std::time::SystemTime;
 
 use crate::cookie::CookieKey;
 
@@ -38,8 +39,9 @@ lazy_static! {
 pub struct KeyId(u32);
 
 impl KeyId {
-    pub fn new() -> KeyId {
-        KeyId(0)
+    /// Create `KeyId` from raw `u32`.
+    pub fn new(key_id: u32) -> KeyId {
+        KeyId(key_id)
     }
 
     /// Create `KeyId` from a `u64` epoch. The 32 most significant bits of the parameter will be
@@ -61,36 +63,56 @@ impl KeyId {
     }
 }
 
+/// Error struct returned from `KeyRotator::rotate` method.
+#[derive(Debug)]
+pub enum RotateError {
+    /// Error from Memcached server.
+    MemcacheError(MemcacheError),
+    /// Error when the Memcached server doesn't have a specified `KeyId`.
+    KeyIdNotFound(KeyId),
+}
+
+impl From<MemcacheError> for RotateError {
+    /// Wrap MemcacheError.
+    fn from(error: MemcacheError) -> RotateError {
+        RotateError::MemcacheError(error)
+    }
+}
+
+/// Key rotator.
 pub struct KeyRotator {
-    pub memcached_url: String,
-    pub prefix: String,
+    /// URL of the Memcached server.
+    memcached_url: String,
+
+    /// Prefix for the Memcached key.
+    prefix: String,
 
     // This property type needs to fit an Epoch time in seconds.
-    pub duration: u64,
+    /// Length of each period in seconds.
+    duration: u64,
 
     // The number of forward and backward periods are `u64` because the timestamp is `u64` and the
     // duration can be as small as 1.
-    pub number_of_forward_periods: u64,
-    pub number_of_backward_periods: u64,
 
-    pub master_key: CookieKey,
-    pub latest: KeyId,
-    pub keys: HashMap<KeyId, Vec<u8>>,
-    pub logger: slog::Logger,
-}
+    /// The number of future periods that the rotator must cache their values from the
+    /// Memcached server.
+    number_of_forward_periods: u64,
 
-trait VecMap {
-    fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>, MemcacheError>;
-}
+    /// The number of previous periods that the rotator must cache their values from the
+    /// Memcached server.
+    number_of_backward_periods: u64,
 
-struct MemcacheVecMap {
-    client: memcache::Client,
-}
+    /// Cookie key that will be used as a MAC key of the rotator.
+    master_key: CookieKey,
 
-impl VecMap for MemcacheVecMap {
-    fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>, MemcacheError> {
-        self.client.get::<Vec<u8>>(key)
-    }
+    /// Key id of the current period.
+    latest_key_id: KeyId,
+
+    /// Cache store.
+    cache: HashMap<KeyId, hmac::Signature>,
+
+    /// Logger.
+    logger: slog::Logger,
 }
 
 impl KeyRotator {
@@ -102,8 +124,8 @@ impl KeyRotator {
         logger: slog::Logger,
     ) -> KeyRotator {
         KeyRotator {
-            latest: KeyId::new(),
-            keys: HashMap::new(),
+            latest_key_id: KeyId::new(0),
+            cache: HashMap::new(),
 
             // It seems that currently we don't have to customize the following three properties,
             // so I will just put default values.
@@ -120,82 +142,94 @@ impl KeyRotator {
     }
 
     /// Rotate keys.
-    pub fn rotate(&mut self) -> Result<(), Box<std::error::Error>> {
+    ///
+    /// # Panics
+    ///
+    /// If the system time is before the UNIX Epoch time.
+    ///
+    /// # Errors
+    ///
+    /// There is an error, if there is a connection problem with Memcached server or the Memcached
+    /// server doesn't contain a key id it supposed to contain.
+    ///
+    pub fn rotate(&mut self) -> Result<(), RotateError> {
         // Side-effect. It's not related to the operation.
         ROTATION_COUNTER.inc();
 
-        // Connecting to memcached. I have to add [..] because it seems that Rust is not smart
-        // enough to do auto-dereference.
-        let client = memcache::Client::connect(&self.memcached_url[..])?;
+        let duration = SystemTime::now().duration_since(UNIX_EPOCH)
+            .expect("The system time must be after the UNIX Epoch time.");
 
-        let duration = SystemTime::now().duration_since(UNIX_EPOCH)?;
         // The number of seconds since the Epoch time.
         let timestamp = duration.as_secs();
 
-        let mut vecmap = MemcacheVecMap { client: client };
-        self.internal_rotate(&mut vecmap, timestamp)
-    }
-
-    fn internal_rotate(&mut self, client: &mut dyn VecMap, timestamp: u64)
-        -> Result<(), Box<std::error::Error>>
-    {
         // The current period number of the timestamp.
         let current_period = timestamp / self.duration;
         // The timestamp at the beginning of the current period.
         let current_epoch = current_period * self.duration;
 
         // The first period number that we want to iterate through.
-        let first_period = current_period - self.number_of_backward_periods;
+        let first_period = current_period.saturating_sub(self.number_of_backward_periods);
 
         // The last period number that we want to iterate through.
-        let last_period = current_period + self.number_of_forward_periods;
+        let last_period = current_period.saturating_add(self.number_of_forward_periods);
 
-        let mut failed = false;
+        let removed_period = first_period.saturating_sub(1);
+        let removed_epoch = removed_period * self.duration;
+        self.cache_remove(KeyId::from_epoch(removed_epoch));
+
+        // Connecting to memcached. I have to add [..] because it seems that Rust is not smart
+        // enough to do auto-dereference.
+        let mut client = memcache::Client::connect(&self.memcached_url[..])?;
 
         for period_number in first_period..=last_period {
             // The timestamp at the beginning of the period.
             let epoch = period_number * self.duration;
 
             let memcached_key = format!("{}/{}", self.prefix, period_number);
-            let memcached_value = client.get(&memcached_key)?;
+            let memcached_value: Option<Vec<u8>> = client.get(&memcached_key)?;
 
             let key_id = KeyId::from_epoch(epoch);
             match memcached_value {
-                Some(s) => {
-                    self.keys.insert(key_id, self.compute_wrap(s));
-                }
+                Some(value) => self.cache_insert(key_id, value.as_slice()),
                 None => {
                     FAILURE_COUNTER.inc();
-                    error!(self.logger, "cannot read from memcache";
-                           "key" => memcached_key,
-                           "memcached_url" => self.memcached_url.clone());
-                    failed = true;
-                }
+                    return Err(RotateError::KeyIdNotFound(key_id));
+                },
             }
         }
-        // removed_period shouldn't be negative because first_period shouldn't be zero.
-        let removed_period = first_period - 1;
-        let removed_epoch = removed_period * self.duration;
-        self.keys.remove(&KeyId::from_epoch(removed_epoch));
 
-        // Not all of our friends may have gotten the same forwards keys as we did
-        self.latest = KeyId::from_epoch(current_epoch);
-        if failed {
-            return Err(
-                io::Error::new(io::ErrorKind::Other, "A request to memcached failed").into(),
-            );
-        } else {
-            return Ok(());
-        }
+        // Not all of our friends may have gotten the same forwards keys as we did.
+        self.latest_key_id = KeyId::from_epoch(current_epoch);
+
+        Ok(())
     }
 
-    fn compute_wrap(&self, val: Vec<u8>) -> Vec<u8> {
-        let key = hmac::SigningKey::new(&digest::SHA256, self.master_key.as_bytes());
-        hmac::sign(&key, &val).as_ref().to_vec()
+    /// Add an entry to the cache.
+    // It should be private. Don't make it public.
+    fn cache_insert(&mut self, key_id: KeyId, value: &[u8]) {
+        // Create a MAC key.
+        let mac_key = hmac::SigningKey::new(&digest::SHA256, self.master_key.as_bytes());
+        // Generating a MAC tag with a MAC key.
+        let tag = hmac::sign(&mac_key, value);
+
+        self.cache.insert(key_id, tag);
     }
 
-    pub fn latest(&self) -> (KeyId, Vec<u8>) {
-        (self.latest, self.keys[&self.latest].clone())
+    /// Remove an entry from the cache.
+    // It should be private. Don't make it public.
+    fn cache_remove(&mut self, key_id: KeyId) {
+        self.cache.remove(&key_id);
+    }
+
+    /// Return the latest key id and hmac tag of the rotator.
+    pub fn latest_key_value(&self) -> (KeyId, &hmac::Signature) {
+        // This unwrap cannot panic because the HashMap will always contain the latest key id.
+        (self.latest_key_id, self.get(self.latest_key_id).unwrap())
+    }
+
+    /// Return an entry in the cache using a key id.
+    pub fn get(&self, key_id: KeyId) -> Option<&hmac::Signature> {
+        self.cache.get(&key_id)
     }
 }
 
@@ -216,66 +250,99 @@ fn read_sleep(rotor: &Arc<RwLock<KeyRotator>>) -> u64 {
     rotor.read().unwrap().duration
 }
 
+// ------------------------------------------------------------------------
+// Tests
+// ------------------------------------------------------------------------
+
+#[cfg(test)] use ::memcache::MemcacheError;
+#[cfg(test)] use test::memcache;
+#[cfg(test)] use test::SystemTime;
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::collections::HashMap;
 
-    struct HashMapVecMap {
-        table: HashMap<String, Option<Vec<u8>>>,
+    use ::memcache::MemcacheError;
+    use lazy_static::lazy_static;
+    use sloggers::Build;
+    use sloggers::null::NullLoggerBuilder;
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    // Mocking memcache.
+    pub mod memcache {
+        use super::*;
+        use std::collections::HashMap;
+
+        lazy_static! {
+            pub static ref HASH_MAP: Mutex<HashMap<String, Vec<u8>>> = Mutex::new(HashMap::new());
+        }
+        pub struct Client;
+        impl Client {
+            pub fn connect(_url: &str) -> Result<Client, MemcacheError> {
+                Ok(Client)
+            }
+            pub fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>, MemcacheError> {
+                Ok(HASH_MAP.lock().unwrap().get(&String::from(key)).cloned())
+            }
+        }
     }
 
-    impl VecMap for HashMapVecMap {
-        fn get(&mut self, key: &str) -> Result<Option<Vec<u8>>, MemcacheError> {
-            Ok(self.table[&key.to_owned()].clone())
+    // Mocking SystemTime.
+    lazy_static! {
+        pub static ref NOW: Mutex<u64> = Mutex::new(0);
+    }
+    pub struct SystemTime;
+    impl SystemTime {
+        pub fn now() -> std::time::SystemTime {
+            let now = NOW.lock().unwrap();
+            let duration = Duration::new(*now, 0);
+            UNIX_EPOCH.checked_add(duration).unwrap()
         }
     }
 
     #[test]
     fn test_rotation() {
-        use sloggers::null::NullLoggerBuilder;
-        use sloggers::Build;
-        let mut testmap = HashMapVecMap {
-            table: HashMap::new(),
-        };
-        testmap
-            .table
-            .insert("test/1".to_string(), Some(vec![1; 32]));
-        testmap
-            .table
-            .insert("test/2".to_string(), Some(vec![2; 32]));
-        testmap
-            .table
-            .insert("test/3".to_string(), Some(vec![3; 32]));
-        testmap
-            .table
-            .insert("test/4".to_string(), Some(vec![4; 32]));
-        testmap.table.insert("test/5".to_string(), None);
-        testmap.table.insert("test/0".to_string(), None);
+        use self::memcache::HASH_MAP;
 
-        let mut test_rotor = KeyRotator {
-            memcached_url: "unused".to_owned(),
-            prefix: "test".to_owned(),
+        let mut hash_map = HASH_MAP.lock().unwrap();
+        hash_map.insert("test/1".to_string(), vec![1; 32]);
+        hash_map.insert("test/2".to_string(), vec![2; 32]);
+        hash_map.insert("test/3".to_string(), vec![3; 32]);
+        hash_map.insert("test/4".to_string(), vec![4; 32]);
+        drop(hash_map);
+
+        let mut rotator = KeyRotator {
+            memcached_url: String::from("unused"),
+            prefix: String::from("test"),
             duration: 1,
             number_of_forward_periods: 1,
             number_of_backward_periods: 1,
-            master_key: vec![0, 32],
-            latest: [1, 2, 3, 4],
-            keys: HashMap::new(),
+            master_key: CookieKey::from(&[0, 32][..]),
+            latest_key_id: KeyId::from_be_bytes([1, 2, 3, 4]),
+            cache: HashMap::new(),
             logger: NullLoggerBuilder.build().unwrap(),
         };
-        test_rotor.internal_rotate(&mut testmap, 2).unwrap();
-        let old_latest = test_rotor.latest;
-        test_rotor.internal_rotate(&mut testmap, 3).unwrap();
-        let new_latest = test_rotor.latest;
+
+        *NOW.lock().unwrap() = 2;
+        // No error because the hash map has "test/1", "test/2", and "test/3".
+        rotator.rotate().unwrap();
+        let old_latest = rotator.latest_key_id;
+
+        *NOW.lock().unwrap() = 3;
+        // No error because the hash map has "test/2", "test/3", and "test/4".
+        rotator.rotate().unwrap();
+        let new_latest = rotator.latest_key_id;
+
+        // The key id should change.
         assert_ne!(old_latest, new_latest);
-        let res = test_rotor.internal_rotate(&mut testmap, 1);
-        if let Ok(_) = res {
-            panic!("Success should not have happened!")
-        }
-        let res = test_rotor.internal_rotate(&mut testmap, 4);
-        if let Ok(_) = res {
-            panic!("Success should not have happened!")
-        }
+
+        *NOW.lock().unwrap() = 1;
+        // Return error because the hash map doesn't have "test/0".
+        rotator.rotate().unwrap_err();
+
+        *NOW.lock().unwrap() = 4;
+        // Return error because the hash map doesn't have "test/5".
+        rotator.rotate().unwrap_err();
     }
 }

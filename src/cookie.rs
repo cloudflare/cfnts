@@ -6,9 +6,12 @@ use miscreant::aead;
 use miscreant::aead::Aead;
 use rand::Rng;
 
+use std::convert::TryInto;
 use std::fs::File;
 use std::io;
 use std::io::Read;
+
+use crate::key_rotator::KeyId;
 
 pub const COOKIE_SIZE: usize = 100;
 #[derive(Debug, Copy, Clone)]
@@ -42,7 +45,7 @@ impl CookieKey {
     }
 }
 
-pub fn make_cookie(keys: NTSKeys, master_key: &[u8], key_id: &[u8; 4]) -> Vec<u8> {
+pub fn make_cookie(keys: NTSKeys, master_key: &[u8], key_id: KeyId) -> Vec<u8> {
     let mut nonce = [0; 16];
     rand::thread_rng().fill(&mut nonce);
     let mut plaintext = [0; 64];
@@ -55,17 +58,17 @@ pub fn make_cookie(keys: NTSKeys, master_key: &[u8], key_id: &[u8; 4]) -> Vec<u8
     let mut aead = aead::Aes128SivAead::new(&master_key);
     let mut ciphertext = aead.seal(&nonce, &[], &plaintext);
     let mut out = Vec::new();
-    out.extend(key_id);
+    out.extend(&key_id.to_be_bytes());
     out.extend(&nonce);
     out.append(&mut ciphertext);
     return out;
 }
 
-pub fn get_keyid(cookie: &[u8]) -> Option<&[u8]> {
+pub fn get_keyid(cookie: &[u8]) -> Option<KeyId> {
     if cookie.len() < 4 {
         None
     } else {
-        Some(&cookie[0..4])
+        Some(KeyId::from_be_bytes((&cookie[0..4]).try_into().unwrap()))
     }
 }
 
@@ -118,7 +121,7 @@ mod tests {
 
         let master_key = [0x07; 32];
         let key_id = [0x03; 4];
-        let mut cookie = make_cookie(test, &master_key, &key_id);
+        let mut cookie = make_cookie(test, &master_key, key_id);
         let ret = get_keyid(&cookie);
 
         assert_eq!(cookie.len(), COOKIE_SIZE);

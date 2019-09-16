@@ -81,7 +81,7 @@ fn response(keys: NTSKeys, master_key: &Arc<RwLock<KeyRotator>>, port: &u16) -> 
     let rotor = master_key.read().unwrap();
     let (epoch, actual_key) = rotor.latest();
     for _i in 1..8 {
-        let cookie = make_cookie(keys, &actual_key, &epoch);
+        let cookie = make_cookie(keys, &actual_key, epoch);
         let mut cookie_rec = NtsKeRecord {
             critical: false,
             record_type: NtsKeType::NewCookie,

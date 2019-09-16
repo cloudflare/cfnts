@@ -31,7 +31,35 @@ lazy_static! {
     )
     .unwrap();
 }
-pub type KeyId = [u8; 4];
+
+/// Key id for `KeyRotator`.
+// This struct should be `Clone` and `Copy` because the internal representation is just a `u32`.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct KeyId(u32);
+
+impl KeyId {
+    pub fn new() -> KeyId {
+        KeyId(0)
+    }
+
+    /// Create `KeyId` from a `u64` epoch. The 32 most significant bits of the parameter will be
+    /// discarded.
+    pub fn from_epoch(epoch: u64) -> KeyId {
+        // This will discard the 32 most significant bits.
+        let epoch_residue = epoch as u32;
+        KeyId(epoch_residue)
+    }
+
+    /// Create `KeyId` from its representation as a byte array in big endian.
+    pub fn from_be_bytes(bytes: [u8; 4]) -> KeyId {
+        KeyId(u32::from_be_bytes(bytes))
+    }
+
+    /// Return the memory representation of this `KeyId` as a byte array in big endian.
+    pub fn to_be_bytes(&self) -> [u8; 4] {
+        self.0.to_be_bytes()
+    }
+}
 
 pub struct KeyRotator {
     pub memcached_url: String,
@@ -49,20 +77,6 @@ pub struct KeyRotator {
     pub latest: KeyId,
     pub keys: HashMap<KeyId, Vec<u8>>,
     pub logger: slog::Logger,
-}
-
-/// This function writes a u64 as 4 bytes in big endian.
-/// Since we are using timestamps we are fine with 4 bytes.
-/// Rollover doesn't matter here since we don't have 38 years worth
-/// of cookies.
-fn be_bytes(n: u64) -> [u8; 4] {
-    let mut ret: [u8; 4] = [0; 4];
-    let mut u = n as u32;
-    for i in 0..3 {
-        ret[3 - i] = u as u8;
-        u = u >> 8;
-    }
-    ret
 }
 
 trait VecMap {
@@ -88,7 +102,7 @@ impl KeyRotator {
         logger: slog::Logger,
     ) -> KeyRotator {
         KeyRotator {
-            latest: [0; 4],
+            latest: KeyId::new(),
             keys: HashMap::new(),
 
             // It seems that currently we don't have to customize the following three properties,
@@ -145,7 +159,7 @@ impl KeyRotator {
             let memcached_key = format!("{}/{}", self.prefix, period_number);
             let memcached_value = client.get(&memcached_key)?;
 
-            let key_id = be_bytes(epoch);
+            let key_id = KeyId::from_epoch(epoch);
             match memcached_value {
                 Some(s) => {
                     self.keys.insert(key_id, self.compute_wrap(s));
@@ -162,10 +176,10 @@ impl KeyRotator {
         // removed_period shouldn't be negative because first_period shouldn't be zero.
         let removed_period = first_period - 1;
         let removed_epoch = removed_period * self.duration;
-        self.keys.remove(&be_bytes(removed_epoch));
+        self.keys.remove(&KeyId::from_epoch(removed_epoch));
 
         // Not all of our friends may have gotten the same forwards keys as we did
-        self.latest = be_bytes(current_epoch);
+        self.latest = KeyId::from_epoch(current_epoch);
         if failed {
             return Err(
                 io::Error::new(io::ErrorKind::Other, "A request to memcached failed").into(),

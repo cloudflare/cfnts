@@ -1,12 +1,15 @@
-// This file is part of cf-nts.
+// This file is part of cfnts.
 // Copyright (c) 2019, Cloudflare. All rights reserved.
 // See LICENSE for licensing information.
 
 //! NTP server implementation.
 
+mod config;
+
+pub use self::config::{Config as NtpServerConfig};
+
 use std::process;
 
-use crate::config;
 use crate::ntp::server::start_ntp_server;
 
 /// Get a configuration file path for `ntp-server`.
@@ -30,7 +33,7 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
 
     // Get the config file path.
     let filename = resolve_config_filename(&matches);
-    let config = config::parse_ntp_config(&filename).unwrap();
+    let config = config::Config::parse(&filename).unwrap();
 
     if let Err(err) = start_ntp_server(&logger, config) {
         eprintln!("Starting NTP server failed: {:?}", err);

@@ -78,7 +78,7 @@ pub fn run_nts_ntp_client(
 
     let mut ip_addrs = (state.next_server.as_str(), state.next_port).to_socket_addrs()?;
     let addr;
-    let mut socket;
+    let socket;
     if let Some(use_ipv4) = state.use_ipv4 {
         if use_ipv4 {
             // mandated to use ipv4

@@ -112,6 +112,9 @@ pub struct KeyRotator {
     cache: HashMap<KeyId, hmac::Signature>,
 
     /// Logger.
+    // TODO: since we don't use the logger now, I will put an `allow(dead_code)` here first. I will
+    // remove it when it's used.
+    #[allow(dead_code)]
     logger: slog::Logger,
 }
 

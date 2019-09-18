@@ -14,19 +14,14 @@ use std::thread;
 use std::time::{Duration, SystemTime};
 use std::vec::Vec;
 
-use crossbeam::sync::WaitGroup;
-
 use mio::tcp::{Shutdown, TcpListener, TcpStream};
 use mio::unix::EventedFd;
 use nix::unistd;
 use nix::unistd::pipe;
-use rustls::{NoClientAuth, ProtocolVersion, ServerConfig, Session};
+use rustls::Session;
 
-use crate::cfsock;
-use crate::ke_server::KeServerConfig;
 use crate::cookie::{make_cookie, NTSKeys};
-use crate::metrics;
-use crate::key_rotator::{periodic_rotate, KeyRotator};
+use crate::key_rotator::KeyRotator;
 
 use super::protocol::gen_key;
 use super::protocol::serialize_record;
@@ -123,7 +118,7 @@ fn gettime() -> u64 {
     diff.unwrap().as_secs()
 }
 
-struct NTSKeyServer {
+pub struct NTSKeyServer {
     server: TcpListener,
     connections: HashMap<mio::Token, Connection>,
     deadlines: BinaryHeap<Timeout>,
@@ -139,7 +134,7 @@ struct NTSKeyServer {
 }
 
 impl NTSKeyServer {
-    fn new(
+    pub fn new(
         server: TcpListener,
         cfg: Arc<rustls::ServerConfig>,
         master_key: Arc<RwLock<KeyRotator>>,
@@ -182,7 +177,7 @@ impl NTSKeyServer {
         })
     }
 
-    fn listen_and_serve(&mut self) {
+    pub fn listen_and_serve(&mut self) {
         let mut events = mio::Events::with_capacity(2048);
         let mut buf = vec![0; 1];
 
@@ -483,79 +478,4 @@ fn pipewrite(wr: RawFd, logger: slog::Logger) {
         }
         thread::sleep(Duration::from_secs(1));
     }
-}
-
-/// start_nts_ke_server reads the configuration and starts the server.
-pub fn start_nts_ke_server(
-    config: KeServerConfig,
-) -> Result<(), Box<std::error::Error>> {
-    let logger = config.logger();
-
-    info!(logger, "Initializing keys with memcached");
-
-    let key_rotator = KeyRotator::connect(
-        String::from("/nts/nts-keys"), // prefix
-        String::from(config.memcached_url()), // memcached_url
-        config.cookie_key().clone(), // master_key
-        logger.clone(), // logger
-    ).expect("error connecting to the memcached server");
-
-
-    let keys = Arc::new(RwLock::new(key_rotator));
-    periodic_rotate(keys.clone());
-
-    // Now we initialize metrics
-    if let Some(metrics_config) = config.metrics_config.clone() {
-        let metrics = metrics_config.clone();
-        info!(logger, "spawning metrics");
-        let log_metrics = logger.new(slog::o!("component"=>"metrics"));
-        thread::spawn(move || {
-            metrics::run_metrics(metrics, &log_metrics)
-                .expect("metrics could not be run; starting ntp server failed");
-        });
-    }
-    // Time to actually run the server
-    run_server_loop(config, keys)
-}
-
-fn run_server_loop(
-    parsed_config: KeServerConfig,
-    keys: Arc<RwLock<KeyRotator>>,
-) -> Result<(), Box<std::error::Error>> {
-    let logger = parsed_config.logger().clone();
-    let mut server_config = ServerConfig::new(NoClientAuth::new());
-    server_config.versions = vec![ProtocolVersion::TLSv1_3];
-    let alpn_proto = String::from("ntske/1");
-    let alpn_bytes = alpn_proto.into_bytes();
-    server_config
-        .set_single_cert(parsed_config.tls_certs.clone(), parsed_config.tls_secret_keys[0].clone())
-        .expect("invalid key or certificate");
-    server_config.set_protocols(&[alpn_bytes]);
-    let conf = Arc::new(server_config);
-    let timeout = parsed_config.conn_timeout.unwrap_or(30);
-
-    let wg = WaitGroup::new();
-    eprintln!("parsed_config.addrs: {:?}", parsed_config.addrs());
-    for addr in parsed_config.addrs() {
-        let listener = cfsock::tcp_listener(&addr)?;
-        eprintln!("listener: {:?}", listener);
-        let mut tlsserv = NTSKeyServer::new(
-            TcpListener::from_listener(listener, &addr)?,
-            conf.clone(),
-            keys.clone(),
-            parsed_config.next_port,
-            addr.clone(),
-            logger.clone(),
-            timeout,
-        )?;
-        info!(logger, "Starting NTS-KE server over TCP/TLS on {:?}", addr);
-        let wg = wg.clone();
-        thread::spawn(move || {
-            tlsserv.listen_and_serve();
-            drop(wg);
-        });
-    }
-
-    wg.wait();
-    Ok(())
 }

@@ -206,23 +206,15 @@ pub fn start_ntp_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let logger = config.logger().clone();
 
-    let mut key_rotator = KeyRotator::new(
+    info!(logger, "Initializing keys with memcached");
+
+    let key_rotator = KeyRotator::connect(
         String::from("/nts/nts-keys"), // prefix
         config.memcached_url, // memcached_url
         config.cookie_key, // master_key
         logger.clone(), // logger
-    );
-    info!(logger, "Initializing keys with memcached");
-    loop {
-        let res = key_rotator.rotate();
-        match res {
-            Err(e) => {
-                error!(logger, "Failure to initialize key rotation: {:?}", e);
-                std::thread::sleep(time::Duration::from_secs(10));
-            }
-            Ok(()) => break,
-        }
-    }
+    ).expect("error connecting to the memcached server");
+
     let keys = Arc::new(RwLock::new(key_rotator));
     periodic_rotate(keys.clone());
 

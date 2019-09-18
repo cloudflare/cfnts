@@ -119,15 +119,17 @@ pub struct KeyRotator {
 }
 
 impl KeyRotator {
-    /// Create a `KeyRotator` instance with the given parameters.
-    pub fn new(
+    /// Connect to the Memcached server and sync some inital keys.
+    pub fn connect(
         prefix: String,
         memcached_url: String,
         master_key: CookieKey,
         logger: slog::Logger,
-    ) -> KeyRotator {
-        KeyRotator {
+    ) -> Result<KeyRotator, RotateError> {
+        let mut rotator = KeyRotator {
+            // Zero shouldn't be a valid KeyId. This is just a temporary value.
             latest_key_id: KeyId::new(0),
+            // The cache should never be empty. This is just a temporary value.
             cache: HashMap::new(),
 
             // It seems that currently we don't have to customize the following three properties,
@@ -141,7 +143,35 @@ impl KeyRotator {
             memcached_url,
             master_key,
             logger,
+        };
+
+        // Maximum number of times that we want to try rotating the keys.
+        let maximum_try = 5;
+
+        // Try to rotate the keys up to 5 times to make sure that the rotator has some keys in it.
+        // If it doesn't, we will not have any key to use.
+        for try_number in 1.. {
+            match rotator.rotate() {
+                Err(error) => {
+                    // Side-effect. Logging.
+                    // Disable the log for now because the Error trait is not implemented for
+                    // RotateError yet.
+                    // error!(rotator.logger, "failure to initialize key rotation: {}", error);
+
+                    // If it already tried a lot of times already, it may be a time to give up.
+                    if try_number == maximum_try {
+                        return Err(error);
+                    }
+
+                    // Wait for 5 seconds before retrying key rotation.
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                }
+                // If it's a success, stop retrying.
+                Ok(()) => break,
+            }
         }
+
+        Ok(rotator)
     }
 
     /// Rotate keys.

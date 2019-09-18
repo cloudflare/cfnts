@@ -12,7 +12,6 @@ use std::net::ToSocketAddrs;
 use std::os::unix::io::{RawFd};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time;
 use std::time::{Duration, SystemTime};
 use std::vec::Vec;
 
@@ -493,26 +492,16 @@ pub fn start_nts_ke_server(
 ) -> Result<(), Box<std::error::Error>> {
     let logger = config.logger();
 
-    let mut key_rotator = KeyRotator::new(
+    info!(logger, "Initializing keys with memcached");
+
+    let key_rotator = KeyRotator::connect(
         String::from("/nts/nts-keys"), // prefix
         String::from(config.memcached_url()), // memcached_url
         config.cookie_key().clone(), // master_key
         logger.clone(), // logger
-    );
+    ).expect("error connecting to the memcached server");
 
-    info!(logger, "Initializing keys with memcached");
 
-    loop {
-        let res = key_rotator.rotate();
-        match res {
-            Err(e) => {
-                ERROR_COUNTER.inc();
-                error!(logger, "Failure to initialize key rotation: {:?}", e);
-                std::thread::sleep(time::Duration::from_secs(10));
-            }
-            Ok(()) => break,
-        }
-    }
     let keys = Arc::new(RwLock::new(key_rotator));
     periodic_rotate(keys.clone());
 

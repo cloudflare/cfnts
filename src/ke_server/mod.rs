@@ -46,13 +46,17 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
     // Let the parsed config use the child logger of the global logger.
     config.set_logger(logger);
 
-    match KeServer::connect(config) {
-        Ok(server) => server.start(),
+    // Try to connect to the Memcached server.
+    let mut server = match KeServer::connect(config) {
+        Ok(server) => server,
         Err(_error) => {
             // Disable the log for now because the Error trait is not implemented for
             // RotateError yet.
             // eprintln!("starting NTS-KE server failed: {}", error);
             process::exit(1);
         }
-    }
+    };
+
+    // Start listening for incoming connections.
+    server.start();
 }

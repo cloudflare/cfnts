@@ -90,9 +90,9 @@ fn response(keys: NTSKeys, master_key: &Arc<RwLock<KeyRotator>>, port: &u16) -> 
 /// We store timeouts in a heap. This structure contains the deadline
 /// and the token by which the connection is identified.
 #[derive(Eq)]
-struct Timeout {
-    deadline: u64,
-    token: mio::Token,
+pub struct Timeout {
+    pub deadline: u64,
+    pub token: mio::Token,
 }
 
 impl Ord for Timeout {
@@ -297,7 +297,7 @@ impl NTSKeyServer {
     }
 }
 
-struct Connection {
+pub struct Connection {
     socket: TcpStream,
     token: mio::Token,
     closing: bool,
@@ -310,7 +310,7 @@ struct Connection {
 }
 
 impl Connection {
-    fn new(
+    pub fn new(
         socket: TcpStream,
         token: mio::Token,
         tls_session: rustls::ServerSession,
@@ -331,7 +331,7 @@ impl Connection {
         }
     }
 
-    fn ready(&mut self, poll: &mut mio::Poll, ev: &mio::Event) {
+    pub fn ready(&mut self, poll: &mut mio::Poll, ev: &mio::Event) {
         if ev.readiness().is_readable() {
             self.do_tls_read();
             self.try_plain_read();
@@ -349,7 +349,7 @@ impl Connection {
         }
     }
 
-    fn do_tls_read(&mut self) {
+    pub fn do_tls_read(&mut self) {
         // Read some TLS data.
         let rc = self.tls_session.read_tls(&mut self.socket);
         if rc.is_err() {
@@ -384,7 +384,7 @@ impl Connection {
         }
     }
 
-    fn try_plain_read(&mut self) {
+    pub fn try_plain_read(&mut self) {
         let mut buf = Vec::new();
         let rc = self.tls_session.read_to_end(&mut buf);
         if rc.is_err() {
@@ -399,7 +399,7 @@ impl Connection {
         }
     }
 
-    fn incoming_plaintext(&mut self, _buf: &[u8]) {
+    pub fn incoming_plaintext(&mut self, _buf: &[u8]) {
         QUERY_COUNTER.inc();
         let keys = gen_key(&self.tls_session).unwrap();
 
@@ -411,11 +411,11 @@ impl Connection {
         }
     }
 
-    fn tls_write(&mut self) -> io::Result<usize> {
+    pub fn tls_write(&mut self) -> io::Result<usize> {
         self.tls_session.write_tls(&mut self.socket)
     }
 
-    fn do_tls_write_and_handle_error(&mut self) {
+    pub fn do_tls_write_and_handle_error(&mut self) {
         let rc = self.tls_write();
         if rc.is_err() {
             ERROR_COUNTER.inc();
@@ -425,7 +425,7 @@ impl Connection {
         }
     }
 
-    fn register(&self, poll: &mut mio::Poll) {
+    pub fn register(&self, poll: &mut mio::Poll) {
         poll.register(
             &self.socket,
             self.token,
@@ -435,7 +435,7 @@ impl Connection {
         .unwrap();
     }
 
-    fn reregister(&self, poll: &mut mio::Poll) {
+    pub fn reregister(&self, poll: &mut mio::Poll) {
         poll.reregister(
             &self.socket,
             self.token,
@@ -445,7 +445,7 @@ impl Connection {
         .unwrap();
     }
 
-    fn event_set(&self) -> mio::Ready {
+    pub fn event_set(&self) -> mio::Ready {
         let rd = self.tls_session.wants_read();
         let wr = self.tls_session.wants_write();
 
@@ -458,11 +458,11 @@ impl Connection {
         }
     }
 
-    fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         self.closed
     }
 
-    fn die(&self) {
+    pub fn die(&self) {
         ERROR_COUNTER.inc();
         error!(self.logger, "forcible shutdown after timeout");
         self.socket.shutdown(Shutdown::Both)

@@ -6,9 +6,12 @@
 
 use std::convert::TryFrom;
 
+use sloggers::terminal::TerminalLoggerBuilder;
+use sloggers::Build;
+
 use crate::cookie::CookieKey;
-use crate::config::MetricsConfig;
 use crate::error::WrapError;
+use crate::metrics::MetricsConfig;
 
 fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
     let mut metrics = None;
@@ -25,30 +28,45 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
 
 /// Configuration for running an NTP server.
 #[derive(Debug)]
-pub struct Config {
+pub struct NtpServerConfig {
     pub addrs: Vec<String>,
     pub cookie_key: CookieKey,
+
+    /// The logger that will be used throughout the application, while the server is running.
+    /// This property is mandatory because logging is very important for debugging.
+    logger: slog::Logger,
+
     pub memcached_url: String,
-    pub metrics: Option<MetricsConfig>,
+    pub metrics_config: Option<MetricsConfig>,
     pub upstream_addr: Option<(String, u16)>,
 }
 
-/// We decided to make Config mutable so that you can add more address after you parse the config
-/// file.
-impl Config {
+/// We decided to make NtpServerConfig mutable so that you can add more address after you parse
+/// the config file.
+impl NtpServerConfig {
     /// Create a NTP server config object with the given next port, memcached url, connection
     /// timeout, and the metrics config.
     pub fn new(
         cookie_key: CookieKey,
         memcached_url: String,
-        metrics: Option<MetricsConfig>,
+        metrics_config: Option<MetricsConfig>,
         upstream_addr: Option<(String, u16)>,
-    ) -> Config {
-        Config {
+    ) -> NtpServerConfig {
+        NtpServerConfig {
             addrs: Vec::new(),
+
+            // Use terminal logger as a default logger. The users can override it using
+            // `set_logger` later, if they want.
+            //
+            // According to `sloggers-0.3.2` source code, the function doesn't return an error at
+            // all. There should be no problem unwrapping here.
+            logger: TerminalLoggerBuilder::new().build()
+                .expect("BUG: TerminalLoggerBuilder::build shouldn't return an error."),
+
+            // From parameters.
             cookie_key,
             memcached_url,
-            metrics,
+            metrics_config,
             upstream_addr,
         }
     }
@@ -56,6 +74,16 @@ impl Config {
     /// Add an address into the config.
     pub fn add_address(&mut self, addr: String) {
         self.addrs.push(addr);
+    }
+
+    /// Set a new logger to the config.
+    pub fn set_logger(&mut self, logger: slog::Logger) {
+        self.logger = logger;
+    }
+
+    /// Return the logger of the config.
+    pub fn logger(&self) -> &slog::Logger {
+        &self.logger
     }
 
     /// Parse a config from a file.
@@ -75,7 +103,7 @@ impl Config {
     ///
     // Returning a `Message` object here is not a good practice. I will figure out a good practice
     // later.
-    pub fn parse(filename: &str) -> Result<Config, config::ConfigError> {
+    pub fn parse(filename: &str) -> Result<NtpServerConfig, config::ConfigError> {
         let mut settings = config::Config::new();
         settings.merge(config::File::with_name(filename))?;
 
@@ -134,7 +162,7 @@ impl Config {
         let cookie_key_filename = settings.get_str("cookie_key_file")?;
         let cookie_key = CookieKey::parse(&cookie_key_filename).wrap_err()?;
 
-        let mut config = Config::new(
+        let mut config = NtpServerConfig::new(
             cookie_key,
             memcached_url,
             metrics_config,

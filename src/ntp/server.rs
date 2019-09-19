@@ -2,13 +2,12 @@ use crate::cfsock;
 use crate::ntp_server::NtpServerConfig;
 use crate::cookie::{eat_cookie, get_keyid, make_cookie, NTSKeys, COOKIE_SIZE};
 use crate::metrics;
-use crate::rotation::{periodic_rotate, RotatingKeys};
+use crate::key_rotator::{periodic_rotate, KeyRotator};
 
 use lazy_static::lazy_static;
 use prometheus::{opts, register_counter, register_int_counter, IntCounter};
 use slog::{error, info};
 
-use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::net::{
     SocketAddr::{V6},
@@ -101,7 +100,7 @@ struct ServerState {
 /// The caller has to set up the socket options correctly
 fn run_server(
     socket: UdpSocket,
-    keys: Arc<RwLock<RotatingKeys>>,
+    keys: Arc<RwLock<KeyRotator>>,
     servstate: Arc<RwLock<ServerState>>,
     logger: slog::Logger,
     ipv4: bool,
@@ -203,34 +202,20 @@ fn run_server(
 
 /// start_ntp_server runs the ntp server with the config specified in config_filename
 pub fn start_ntp_server(
-    logger: &slog::Logger,
     config: NtpServerConfig,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let logger = logger.new(slog::o!("component"=>"ntp"));
+    let logger = config.logger().clone();
 
-    let mut key_rot = RotatingKeys {
-        memcache_url: config.memcached_url,
-        prefix: "/nts/nts-keys".to_string(),
-        duration: 3600,
-        forward_periods: 2,
-        backward_periods: 24,
-        master_key: Vec::from(config.cookie_key.as_bytes()),
-        latest: [0; 4],
-        keys: HashMap::new(),
-        logger: logger.clone(),
-    };
     info!(logger, "Initializing keys with memcached");
-    loop {
-        let res = key_rot.rotate_keys();
-        match res {
-            Err(e) => {
-                error!(logger, "Failure to initialize key rotation: {:?}", e);
-                std::thread::sleep(time::Duration::from_secs(10));
-            }
-            Ok(()) => break,
-        }
-    }
-    let keys = Arc::new(RwLock::new(key_rot));
+
+    let key_rotator = KeyRotator::connect(
+        String::from("/nts/nts-keys"), // prefix
+        config.memcached_url, // memcached_url
+        config.cookie_key, // master_key
+        logger.clone(), // logger
+    ).expect("error connecting to the memcached server");
+
+    let keys = Arc::new(RwLock::new(key_rotator));
     periodic_rotate(keys.clone());
 
     let servstate_struct = ServerState {
@@ -266,7 +251,7 @@ pub fn start_ntp_server(
         }
     }
 
-    if let Some(metrics_config) = config.metrics {
+    if let Some(metrics_config) = config.metrics_config {
         let metrics = metrics_config.clone();
         info!(logger, "spawning metrics");
         let log_metrics = logger.new(slog::o!("component"=>"metrics"));
@@ -358,7 +343,7 @@ fn response(
     query: &[u8],
     r_time: SystemTime,
     t_time: SystemTime,
-    cookie_keys: Arc<RwLock<RotatingKeys>>,
+    cookie_keys: Arc<RwLock<KeyRotator>>,
     servstate: Arc<RwLock<ServerState>>,
     logger: slog::Logger,
 ) -> Result<Vec<u8>, std::io::Error> {
@@ -377,10 +362,10 @@ fn response(
         match keyid_maybe {
             Some(keyid) => {
                 let point = cookie_keys.read().unwrap();
-                let key_maybe = (*point).keys.get(keyid);
+                let key_maybe = (*point).get(keyid);
                 match key_maybe {
                     Some(key) => {
-                        let nts_keys = eat_cookie(&cookie.contents, key);
+                        let nts_keys = eat_cookie(&cookie.contents, key.as_ref());
                         match nts_keys {
                             Some(nts_dir_keys) => {
                                 Ok(process_nts(
@@ -418,7 +403,7 @@ fn response(
 fn process_nts(
     resp_header: NtpPacketHeader,
     keys: NTSKeys,
-    cookie_keys: Arc<RwLock<RotatingKeys>>,
+    cookie_keys: Arc<RwLock<KeyRotator>>,
     query_raw: &[u8],
 ) -> Vec<u8> {
     let mut recv_aead = Aes128SivAead::new(&keys.c2s);
@@ -437,7 +422,7 @@ fn nts_response(
     query: NtsPacket,
     header: NtpPacketHeader,
     keys: NTSKeys,
-    cookie_keys: Arc<RwLock<RotatingKeys>>,
+    cookie_keys: Arc<RwLock<KeyRotator>>,
 ) -> NtsPacket {
     let mut resp_packet = NtsPacket {
         header: header,
@@ -451,8 +436,8 @@ fn nts_response(
                 if ext.contents.len() >= COOKIE_SIZE {
                     // Avoid amplification
                     let keymaker = cookie_keys.read().unwrap();
-                    let (id, curr_key) = keymaker.latest();
-                    let cookie = make_cookie(keys, &curr_key, &id);
+                    let (key_id, curr_key) = keymaker.latest_key_value();
+                    let cookie = make_cookie(keys, curr_key.as_ref(), key_id);
                     resp_packet.auth_enc_exts.push(NtpExtension {
                         ext_type: NTSCookie,
                         contents: cookie,
@@ -463,8 +448,9 @@ fn nts_response(
         }
     }
     // This is a free cookie to replace the one consumed in the packet
-    let (id, curr_key) = cookie_keys.read().unwrap().latest();
-    let cookie = make_cookie(keys, &curr_key, &id);
+    let keymaker = cookie_keys.read().unwrap();
+    let (key_id, curr_key) = keymaker.latest_key_value();
+    let cookie = make_cookie(keys, curr_key.as_ref(), key_id);
     resp_packet.auth_enc_exts.push(NtpExtension {
         ext_type: NTSCookie,
         contents: cookie,

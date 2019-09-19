@@ -5,11 +5,34 @@
 //! NTS client implementation.
 
 use slog::debug;
+
+use std::fs;
+use std::io::BufReader;
 use std::process;
 
-use crate::config;
+use rustls::{
+    internal::pemfile::certs,
+    Certificate,
+};
+
+use crate::error::WrapError;
 use crate::ntp::client::run_nts_ntp_client;
 use crate::nts_ke::client::run_nts_ke_client;
+
+#[derive(Debug)]
+pub struct ClientConfig {
+    pub host: String,
+    pub port: Option<String>,
+    pub trusted_cert: Option<Certificate>,
+    pub use_ipv4: Option<bool>
+}
+
+pub fn load_tls_certs(path: String) -> Result<Vec<Certificate>, config::ConfigError> {
+    certs(&mut BufReader::new(fs::File::open(&path).wrap_err()?))
+        .map_err(|()| config::ConfigError::Message(
+            format!("could not load certificate from {}", &path)
+        ))
+}
 
 /// The entry point of `client`.
 pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
@@ -41,12 +64,12 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
 
     let mut trusted_cert = None;
     if let Some(file) = cert_file {
-        if let Ok(certs) = config::load_tls_certs(file) {
+        if let Ok(certs) = load_tls_certs(file) {
             trusted_cert = Some(certs[0].clone());
         }
     }
 
-    let client_config = config::ConfigNTSClient {
+    let client_config = ClientConfig {
         host,
         port,
         trusted_cert,
@@ -57,8 +80,8 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
 
     match res {
         Err(err) => {
-            eprintln!("failure of tls stage {:?}", err);
-            process::exit(125)
+            eprintln!("failure of tls stage: {}", err);
+            process::exit(1)
         }
         Ok(_) => {}
     }
@@ -67,13 +90,12 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
     let res = run_nts_ntp_client(&logger, state);
     match res {
         Err(err) => {
-            eprintln!("Failure of client {:?}", err);
-            process::exit(126)
+            eprintln!("failure of client: {}", err);
+            process::exit(1)
         }
         Ok(result) => {
             println!("stratum: {:}", result.stratum);
             println!("offset: {:.6}", result.time_diff);
-            process::exit(0)
         }
     }
 }

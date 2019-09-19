@@ -7,13 +7,16 @@
 use rustls::{Certificate, PrivateKey};
 use rustls::internal::pemfile;
 
+use sloggers::terminal::TerminalLoggerBuilder;
+use sloggers::Build;
+
 use std::convert::TryFrom;
 use std::fs::File;
 use std::io;
 
 use crate::cookie::CookieKey;
-use crate::config::MetricsConfig;
 use crate::error::WrapError;
+use crate::metrics::MetricsConfig;
 
 fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
     let mut metrics = None;
@@ -30,38 +33,60 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
 
 /// Configuration for running an NTS-KE server.
 #[derive(Debug)]
-pub struct Config {
+pub struct KeServerConfig {
     pub addrs: Vec<String>,
-    pub cookie_key: CookieKey,
+
+    /// The initial cookie key for the NTS-KE server.
+    cookie_key: CookieKey,
+
     pub conn_timeout: Option<u64>,
-    pub memcached_url: String,
-    pub metrics: Option<MetricsConfig>,
+
+    /// The logger that will be used throughout the application, while the server is running.
+    /// This property is mandatory because logging is very important for debugging.
+    logger: slog::Logger,
+
+    /// The url of the memcached server. The memcached server is used to sync data between the
+    /// NTS-KE server and the NTP server.
+    memcached_url: String,
+
+    pub metrics_config: Option<MetricsConfig>,
     pub next_port: u16,
     pub tls_certs: Vec<Certificate>,
     pub tls_secret_keys: Vec<PrivateKey>,
 }
 
-/// We decided to make Config mutable so that you can add more cert, private key, or address after
-/// you parse the config file.
-impl Config {
+/// We decided to make KeServerConfig mutable so that you can add more cert, private key, or
+/// address after you parse the config file.
+impl KeServerConfig {
     /// Create a NTS-KE server config object with the given next port, memcached url, connection
     /// timeout, and the metrics config.
     pub fn new(
         conn_timeout: Option<u64>,
         cookie_key: CookieKey,
         memcached_url: String,
-        metrics: Option<MetricsConfig>,
+        metrics_config: Option<MetricsConfig>,
         next_port: u16,
-    ) -> Config {
-        Config {
+    ) -> KeServerConfig {
+        KeServerConfig {
+            addrs: Vec::new(),
+
+            // Use terminal logger as a default logger. The users can override it using
+            // `set_logger` later, if they want.
+            //
+            // According to `sloggers-0.3.2` source code, the function doesn't return an error at
+            // all. There should be no problem unwrapping here.
+            logger: TerminalLoggerBuilder::new().build()
+                .expect("BUG: TerminalLoggerBuilder::build shouldn't return an error."),
+
             tls_certs: Vec::new(),
             tls_secret_keys: Vec::new(),
+
+            // From parameters.
             cookie_key,
-            addrs: Vec::new(),
-            next_port,
             conn_timeout,
             memcached_url,
-            metrics,
+            metrics_config,
+            next_port,
         }
     }
 
@@ -82,6 +107,26 @@ impl Config {
     /// Add an address into the config.
     pub fn add_address(&mut self, addr: String) {
         self.addrs.push(addr);
+    }
+
+    /// Return the cookie key of the config.
+    pub fn cookie_key(&self) -> &CookieKey {
+        &self.cookie_key
+    }
+
+    /// Set a new logger to the config.
+    pub fn set_logger(&mut self, logger: slog::Logger) {
+        self.logger = logger;
+    }
+
+    /// Return the logger of the config.
+    pub fn logger(&self) -> &slog::Logger {
+        &self.logger
+    }
+
+    /// Return the memcached url of the config.
+    pub fn memcached_url(&self) -> &str {
+        &self.memcached_url
     }
 
     /// Import TLS certificates from a file.
@@ -166,11 +211,11 @@ impl Config {
     /// following cases:
     ///
     /// * The next port in the configuration file is a valid `i64` but not a valid `u16`.
-    /// * The connection in the configuration file is a valid `i64` but not a valid `u64`.
+    /// * The connection timeout in the configuration file is a valid `i64` but not a valid `u64`.
     ///
     // Returning a `Message` object here is not a good practice. I will figure out a good practice
     // later.
-    pub fn parse(filename: &str) -> Result<Config, config::ConfigError> {
+    pub fn parse(filename: &str) -> Result<KeServerConfig, config::ConfigError> {
         let mut settings = config::Config::new();
         settings.merge(config::File::with_name(filename))?;
 
@@ -231,7 +276,7 @@ impl Config {
         let cookie_key_filename = settings.get_str("cookie_key_file")?;
         let cookie_key = CookieKey::parse(&cookie_key_filename).wrap_err()?;
 
-        let mut config = Config::new(
+        let mut config = KeServerConfig::new(
             conn_timeout,
             cookie_key,
             memcached_url,

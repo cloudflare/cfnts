@@ -13,15 +13,14 @@ extern crate sloggers;
 mod cfsock;
 mod client;
 mod cmd;
-mod config;
 mod cookie;
 mod error;
 mod ke_server;
+mod key_rotator;
 mod metrics;
 mod ntp;
 mod ntp_server;
 mod nts_ke;
-mod rotation;
 
 use sloggers::terminal::{Destination, TerminalLoggerBuilder};
 use sloggers::types::Severity;
@@ -70,7 +69,7 @@ fn main() {
     let _scope_guard = slog_scope::set_global_logger(logger.clone());
 
     if matches.subcommand.is_none() {
-        eprintln!("Please specify a valid subcommand. Only client, ke-server, and ntp-server \
+        eprintln!("please specify a valid subcommand: only client, ke-server, and ntp-server \
                    are supported.");
         process::exit(1);
     }

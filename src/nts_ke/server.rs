@@ -12,7 +12,6 @@ use std::net::ToSocketAddrs;
 use std::os::unix::io::{RawFd};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time;
 use std::time::{Duration, SystemTime};
 use std::vec::Vec;
 
@@ -28,7 +27,7 @@ use crate::cfsock;
 use crate::ke_server::KeServerConfig;
 use crate::cookie::{make_cookie, NTSKeys};
 use crate::metrics;
-use crate::rotation::{periodic_rotate, RotatingKeys};
+use crate::key_rotator::{periodic_rotate, KeyRotator};
 
 use super::protocol::gen_key;
 use super::protocol::serialize_record;
@@ -48,7 +47,7 @@ lazy_static! {
 
 // response uses the configuration and the keys and computes the response
 // sent to the client.
-fn response(keys: NTSKeys, master_key: &Arc<RwLock<RotatingKeys>>, port: &u16) -> Vec<u8> {
+fn response(keys: NTSKeys, master_key: &Arc<RwLock<KeyRotator>>, port: &u16) -> Vec<u8> {
     let mut response: Vec<u8> = Vec::new();
     let mut next_proto = NtsKeRecord {
         critical: true,
@@ -79,9 +78,9 @@ fn response(keys: NTSKeys, master_key: &Arc<RwLock<RotatingKeys>>, port: &u16) -
     response.append(&mut serialize_record(&mut next_proto));
     response.append(&mut serialize_record(&mut aead_rec));
     let rotor = master_key.read().unwrap();
-    let (epoch, actual_key) = rotor.latest();
+    let (key_id, actual_key) = rotor.latest_key_value();
     for _i in 1..8 {
-        let cookie = make_cookie(keys, &actual_key, &epoch);
+        let cookie = make_cookie(keys, actual_key.as_ref(), key_id);
         let mut cookie_rec = NtsKeRecord {
             critical: false,
             record_type: NtsKeType::NewCookie,
@@ -131,7 +130,7 @@ struct NTSKeyServer {
     deadlines: BinaryHeap<Timeout>,
     next_id: usize,
     tls_config: Arc<rustls::ServerConfig>,
-    master_key: Arc<RwLock<RotatingKeys>>,
+    master_key: Arc<RwLock<KeyRotator>>,
     next_port: u16,
     listen_addr: std::net::SocketAddr,
     logger: slog::Logger,
@@ -144,7 +143,7 @@ impl NTSKeyServer {
     fn new(
         server: TcpListener,
         cfg: Arc<rustls::ServerConfig>,
-        master_key: Arc<RwLock<RotatingKeys>>,
+        master_key: Arc<RwLock<KeyRotator>>,
         next_port: u16,
         listen_addr: std::net::SocketAddr,
         logger: slog::Logger,
@@ -311,7 +310,7 @@ struct Connection {
     closed: bool,
     sent_response: bool,
     tls_session: rustls::ServerSession,
-    master_key: Arc<RwLock<RotatingKeys>>,
+    master_key: Arc<RwLock<KeyRotator>>,
     next_port: u16,
     logger: slog::Logger,
 }
@@ -321,7 +320,7 @@ impl Connection {
         socket: TcpStream,
         token: mio::Token,
         tls_session: rustls::ServerSession,
-        master_key: Arc<RwLock<RotatingKeys>>,
+        master_key: Arc<RwLock<KeyRotator>>,
         port: u16,
         logger: slog::Logger,
     ) -> Connection {
@@ -489,39 +488,25 @@ fn pipewrite(wr: RawFd, logger: slog::Logger) {
 
 /// start_nts_ke_server reads the configuration and starts the server.
 pub fn start_nts_ke_server(
-    start_logger: &slog::Logger,
     config: KeServerConfig,
 ) -> Result<(), Box<std::error::Error>> {
-    let logger = start_logger.new(slog::o!("component"=>"nts_ke"));
-    // First parse config for TLS server using local config module.
-    let mut key_rot = RotatingKeys {
-        memcache_url: config.memcached_url.clone(),
-        prefix: "/nts/nts-keys".to_string(),
-        duration: 3600,
-        forward_periods: 2,
-        backward_periods: 24,
-        master_key: Vec::from(config.cookie_key.as_bytes()),
-        latest: [0; 4],
-        keys: HashMap::new(),
-        logger: logger.clone(),
-    };
+    let logger = config.logger();
+
     info!(logger, "Initializing keys with memcached");
-    loop {
-        let res = key_rot.rotate_keys();
-        match res {
-            Err(e) => {
-                ERROR_COUNTER.inc();
-                error!(logger, "Failure to initialize key rotation: {:?}", e);
-                std::thread::sleep(time::Duration::from_secs(10));
-            }
-            Ok(()) => break,
-        }
-    }
-    let keys = Arc::new(RwLock::new(key_rot));
+
+    let key_rotator = KeyRotator::connect(
+        String::from("/nts/nts-keys"), // prefix
+        String::from(config.memcached_url()), // memcached_url
+        config.cookie_key().clone(), // master_key
+        logger.clone(), // logger
+    ).expect("error connecting to the memcached server");
+
+
+    let keys = Arc::new(RwLock::new(key_rotator));
     periodic_rotate(keys.clone());
 
     // Now we initialize metrics
-    if let Some(metrics_config) = config.metrics.clone() {
+    if let Some(metrics_config) = config.metrics_config.clone() {
         let metrics = metrics_config.clone();
         info!(logger, "spawning metrics");
         let log_metrics = logger.new(slog::o!("component"=>"metrics"));
@@ -531,14 +516,14 @@ pub fn start_nts_ke_server(
         });
     }
     // Time to actually run the server
-    run_server_loop(config, &logger, keys)
+    run_server_loop(config, keys)
 }
 
 fn run_server_loop(
     parsed_config: KeServerConfig,
-    logger: &slog::Logger,
-    keys: Arc<RwLock<RotatingKeys>>,
+    keys: Arc<RwLock<KeyRotator>>,
 ) -> Result<(), Box<std::error::Error>> {
+    let logger = parsed_config.logger().clone();
     let mut server_config = ServerConfig::new(NoClientAuth::new());
     server_config.versions = vec![ProtocolVersion::TLSv1_3];
     let alpn_proto = String::from("ntske/1");

@@ -6,7 +6,7 @@
 
 mod config;
 
-pub use self::config::{Config as NtpServerConfig};
+pub use self::config::NtpServerConfig;
 
 use std::process;
 
@@ -29,14 +29,25 @@ fn resolve_config_filename<'a>(matches: &clap::ArgMatches<'a>) -> String {
 /// The entry point of `ntp-server`.
 pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
     // This should return the clone of `logger` in the main function.
-    let logger = slog_scope::logger();
+    let global_logger = slog_scope::logger();
 
     // Get the config file path.
     let filename = resolve_config_filename(&matches);
-    let config = config::Config::parse(&filename).unwrap();
+    let mut config = match NtpServerConfig::parse(&filename) {
+        Ok(val) => val,
+        // If there is an error, display it.
+        Err(err) => {
+            eprintln!("{}", err);
+            process::exit(1);
+        },
+    };
 
-    if let Err(err) = start_ntp_server(&logger, config) {
-        eprintln!("Starting NTP server failed: {:?}", err);
-        process::exit(126);
+    let logger = global_logger.new(slog::o!("component" => "ntp"));
+    // Let the parsed config use the child logger of the global logger.
+    config.set_logger(logger);
+
+    if let Err(err) = start_ntp_server(config) {
+        eprintln!("starting NTP server failed: {}", err);
+        process::exit(1);
     }
 }

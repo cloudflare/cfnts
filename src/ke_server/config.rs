@@ -12,7 +12,7 @@ use sloggers::Build;
 
 use std::convert::TryFrom;
 use std::fs::File;
-use std::io;
+use std::net::SocketAddr;
 
 use crate::cookie::CookieKey;
 use crate::error::WrapError;
@@ -34,7 +34,9 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
 /// Configuration for running an NTS-KE server.
 #[derive(Debug)]
 pub struct KeServerConfig {
-    pub addrs: Vec<String>,
+    /// List of addresses and ports to the server will be listening to.
+    // Each of the elements can be either IPv4 or IPv6 address. It cannot be a UNIX socket address.
+    addrs: Vec<SocketAddr>,
 
     /// The initial cookie key for the NTS-KE server.
     cookie_key: CookieKey,
@@ -105,8 +107,13 @@ impl KeServerConfig {
     }
 
     /// Add an address into the config.
-    pub fn add_address(&mut self, addr: String) {
+    pub fn add_address(&mut self, addr: SocketAddr) {
         self.addrs.push(addr);
+    }
+
+    /// Return a list of addresses.
+    pub fn addrs(&self) -> &[SocketAddr] {
+        self.addrs.as_slice()
     }
 
     /// Return the cookie key of the config.
@@ -138,11 +145,11 @@ impl KeServerConfig {
     ///
     // Because the order of `tls_certs` has to correspond to the order of `tls_secret_keys`, this
     // method has to be private for now.
-    fn import_tls_certs(&mut self, filename: &str) -> Result<(), io::Error> {
+    fn import_tls_certs(&mut self, filename: &str) -> Result<(), std::io::Error> {
         // Open a file. If there is any error, return it immediately.
         let file = File::open(filename)?;
 
-        match pemfile::certs(&mut io::BufReader::new(file)) {
+        match pemfile::certs(&mut std::io::BufReader::new(file)) {
             Ok(certs) => {
                 // Add all parsed certificates.
                 for cert in certs {
@@ -156,8 +163,8 @@ impl KeServerConfig {
             //
             // The `std::io` module has an error kind of `InvalidData` which is perfectly
             // suitable for our kind of error.
-            Err(()) => Err(io::Error::new(
-                io::ErrorKind::InvalidData,
+            Err(()) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
                 format!("cannot parse TLS certificates from {}", filename),
             )),
         }
@@ -172,11 +179,11 @@ impl KeServerConfig {
     ///
     // Because the order of `tls_certs` has to correspond to the order of `tls_secret_keys`, this
     // method has to be private for now.
-    fn import_tls_secret_keys(&mut self, filename: &str) -> Result<(), io::Error> {
+    fn import_tls_secret_keys(&mut self, filename: &str) -> Result<(), std::io::Error> {
         // Open a file. If there is any error, return it immediately.
         let file = File::open(filename)?;
 
-        match pemfile::pkcs8_private_keys(&mut io::BufReader::new(file)) {
+        match pemfile::pkcs8_private_keys(&mut std::io::BufReader::new(file)) {
             Ok(secret_keys) => {
                 // Add all parsed secret keys.
                 for secret_key in secret_keys {
@@ -190,8 +197,8 @@ impl KeServerConfig {
             //
             // The `std::io` module has an error kind of `InvalidData` which is perfectly
             // suitable for our kind of error.
-            Err(()) => Err(io::Error::new(
-                io::ErrorKind::InvalidData,
+            Err(()) => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
                 format!("cannot parse TLS private keys from {}", filename),
             )),
         }
@@ -204,8 +211,11 @@ impl KeServerConfig {
     /// Currently we return `config::ConfigError` which is returned from functions in the
     /// `config` crate itself.
     ///
-    /// For any error from any file specified in the configuration, `io::Error` which is wrapped
-    /// inside `config::ConfigError::Foreign` will be returned instead.
+    /// For any error from any file specified in the configuration, `std::io::Error` which is
+    /// wrapped inside `config::ConfigError::Foreign` will be returned.
+    ///
+    /// For any address parsing error, `std::io::Error` wrapped inside
+    /// `config::ConfigError::Foreign` will also be returned.
     ///
     /// In addition, it also returns some custom `config::ConfigError::Message` errors, for the
     /// following cases:
@@ -289,7 +299,9 @@ impl KeServerConfig {
 
         let addrs = settings.get_array("addr")?;
         for addr in addrs {
-            config.add_address(addr.to_string());
+            // Parse SocketAddr from a string.
+            let sock_addr = addr.to_string().parse().wrap_err()?;
+            config.add_address(sock_addr);
         }
 
         Ok(config)

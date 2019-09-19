@@ -4,10 +4,12 @@
 
 //! NTP server configuration.
 
-use std::convert::TryFrom;
-
 use sloggers::terminal::TerminalLoggerBuilder;
 use sloggers::Build;
+
+use std::convert::TryFrom;
+use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr;
 
 use crate::cookie::CookieKey;
 use crate::error::WrapError;
@@ -29,7 +31,10 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
 /// Configuration for running an NTP server.
 #[derive(Debug)]
 pub struct NtpServerConfig {
-    pub addrs: Vec<String>,
+    /// List of addresses and ports to the server will be listening to.
+    // Each of the elements can be either IPv4 or IPv6 address. It cannot be a UNIX socket address.
+    addrs: Vec<SocketAddr>,
+
     pub cookie_key: CookieKey,
 
     /// The logger that will be used throughout the application, while the server is running.
@@ -38,7 +43,7 @@ pub struct NtpServerConfig {
 
     pub memcached_url: String,
     pub metrics_config: Option<MetricsConfig>,
-    pub upstream_addr: Option<(String, u16)>,
+    pub upstream_addr: Option<SocketAddr>,
 }
 
 /// We decided to make NtpServerConfig mutable so that you can add more address after you parse
@@ -50,7 +55,7 @@ impl NtpServerConfig {
         cookie_key: CookieKey,
         memcached_url: String,
         metrics_config: Option<MetricsConfig>,
-        upstream_addr: Option<(String, u16)>,
+        upstream_addr: Option<SocketAddr>,
     ) -> NtpServerConfig {
         NtpServerConfig {
             addrs: Vec::new(),
@@ -72,8 +77,13 @@ impl NtpServerConfig {
     }
 
     /// Add an address into the config.
-    pub fn add_address(&mut self, addr: String) {
+    pub fn add_address(&mut self, addr: SocketAddr) {
         self.addrs.push(addr);
+    }
+
+    /// Return a list of addresses.
+    pub fn addrs(&self) -> &[SocketAddr] {
+        self.addrs.as_slice()
     }
 
     /// Set a new logger to the config.
@@ -93,8 +103,11 @@ impl NtpServerConfig {
     /// Currently we return `config::ConfigError` which is returned from functions in the
     /// `config` crate itself.
     ///
-    /// For any error from any file specified in the configuration, `io::Error` which is wrapped
-    /// inside `config::ConfigError::Foreign` will be returned instead.
+    /// For any error from any file specified in the configuration, `std::io::Error` which is
+    /// wrapped inside `config::ConfigError::Foreign` will be returned.
+    ///
+    /// For any address parsing error, `std::io::Error` wrapped inside
+    /// `config::ConfigError::Foreign` will also be returned.
     ///
     /// In addition, it also returns some custom `config::ConfigError::Message` errors, for the
     /// following cases:
@@ -149,9 +162,15 @@ impl NtpServerConfig {
             Ok(addr) => Some(addr),
         };
 
-        let upstream_addr_port = if upstream_addr.is_some() && upstream_port.is_some() {
-            // No problem to unwrap here because both are Some(_).
-            Some((upstream_addr.unwrap(), upstream_port.unwrap()))
+        let upstream_sock_addr = if upstream_addr.is_some() && upstream_port.is_some() {
+            let sock_addr = SocketAddr::from((
+                // No problem to unwrap here because `upstream_addr` is Some(_).
+                IpAddr::from_str(&upstream_addr.unwrap()).wrap_err()?,
+
+                // No problem to unwrap here because `upstream_port` is Some(_).
+                upstream_port.unwrap(),
+            ));
+            Some(sock_addr)
         } else {
             None
         };
@@ -166,12 +185,14 @@ impl NtpServerConfig {
             cookie_key,
             memcached_url,
             metrics_config,
-            upstream_addr_port,
+            upstream_sock_addr,
         );
 
         let addrs = settings.get_array("addr")?;
         for addr in addrs {
-            config.add_address(addr.to_string());
+            // Parse SocketAddr from a string.
+            let sock_addr = addr.to_string().parse().wrap_err()?;
+            config.add_address(sock_addr);
         }
 
         Ok(config)

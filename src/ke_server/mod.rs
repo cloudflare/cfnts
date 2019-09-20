@@ -5,12 +5,12 @@
 //! NTS-KE server implementation.
 
 mod config;
+mod context;
 
 pub use self::config::KeServerConfig;
+pub use self::context::KeServer;
 
 use std::process;
-
-use crate::nts_ke::server::start_nts_ke_server;
 
 /// Get a configuration file path for `ke-server`.
 ///
@@ -46,8 +46,17 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
     // Let the parsed config use the child logger of the global logger.
     config.set_logger(logger);
 
-    if let Err(err) = start_nts_ke_server(config) {
-        eprintln!("starting NTS-KE server failed: {}", err);
-        process::exit(1);
-    }
+    // Try to connect to the Memcached server.
+    let mut server = match KeServer::connect(config) {
+        Ok(server) => server,
+        Err(_error) => {
+            // Disable the log for now because the Error trait is not implemented for
+            // RotateError yet.
+            // eprintln!("starting NTS-KE server failed: {}", error);
+            process::exit(1);
+        }
+    };
+
+    // Start listening for incoming connections.
+    server.start();
 }

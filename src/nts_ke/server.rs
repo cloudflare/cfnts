@@ -14,19 +14,14 @@ use std::thread;
 use std::time::{Duration, SystemTime};
 use std::vec::Vec;
 
-use crossbeam::sync::WaitGroup;
-
 use mio::tcp::{Shutdown, TcpListener, TcpStream};
 use mio::unix::EventedFd;
 use nix::unistd;
 use nix::unistd::pipe;
-use rustls::{NoClientAuth, ProtocolVersion, ServerConfig, Session};
+use rustls::Session;
 
-use crate::cfsock;
-use crate::ke_server::KeServerConfig;
 use crate::cookie::{make_cookie, NTSKeys};
-use crate::metrics;
-use crate::key_rotator::{periodic_rotate, KeyRotator};
+use crate::key_rotator::KeyRotator;
 
 use super::protocol::gen_key;
 use super::protocol::serialize_record;
@@ -95,9 +90,9 @@ fn response(keys: NTSKeys, master_key: &Arc<RwLock<KeyRotator>>, port: &u16) -> 
 /// We store timeouts in a heap. This structure contains the deadline
 /// and the token by which the connection is identified.
 #[derive(Eq)]
-struct Timeout {
-    deadline: u64,
-    token: mio::Token,
+pub struct Timeout {
+    pub deadline: u64,
+    pub token: mio::Token,
 }
 
 impl Ord for Timeout {
@@ -123,7 +118,7 @@ fn gettime() -> u64 {
     diff.unwrap().as_secs()
 }
 
-struct NTSKeyServer {
+pub struct NTSKeyServer {
     server: TcpListener,
     connections: HashMap<mio::Token, Connection>,
     deadlines: BinaryHeap<Timeout>,
@@ -139,7 +134,7 @@ struct NTSKeyServer {
 }
 
 impl NTSKeyServer {
-    fn new(
+    pub fn new(
         server: TcpListener,
         cfg: Arc<rustls::ServerConfig>,
         master_key: Arc<RwLock<KeyRotator>>,
@@ -182,7 +177,7 @@ impl NTSKeyServer {
         })
     }
 
-    fn listen_and_serve(&mut self) {
+    pub fn listen_and_serve(&mut self) {
         let mut events = mio::Events::with_capacity(2048);
         let mut buf = vec![0; 1];
 
@@ -302,7 +297,7 @@ impl NTSKeyServer {
     }
 }
 
-struct Connection {
+pub struct Connection {
     socket: TcpStream,
     token: mio::Token,
     closing: bool,
@@ -315,7 +310,7 @@ struct Connection {
 }
 
 impl Connection {
-    fn new(
+    pub fn new(
         socket: TcpStream,
         token: mio::Token,
         tls_session: rustls::ServerSession,
@@ -336,7 +331,7 @@ impl Connection {
         }
     }
 
-    fn ready(&mut self, poll: &mut mio::Poll, ev: &mio::Event) {
+    pub fn ready(&mut self, poll: &mut mio::Poll, ev: &mio::Event) {
         if ev.readiness().is_readable() {
             self.do_tls_read();
             self.try_plain_read();
@@ -354,7 +349,7 @@ impl Connection {
         }
     }
 
-    fn do_tls_read(&mut self) {
+    pub fn do_tls_read(&mut self) {
         // Read some TLS data.
         let rc = self.tls_session.read_tls(&mut self.socket);
         if rc.is_err() {
@@ -389,7 +384,7 @@ impl Connection {
         }
     }
 
-    fn try_plain_read(&mut self) {
+    pub fn try_plain_read(&mut self) {
         let mut buf = Vec::new();
         let rc = self.tls_session.read_to_end(&mut buf);
         if rc.is_err() {
@@ -404,7 +399,7 @@ impl Connection {
         }
     }
 
-    fn incoming_plaintext(&mut self, _buf: &[u8]) {
+    pub fn incoming_plaintext(&mut self, _buf: &[u8]) {
         QUERY_COUNTER.inc();
         let keys = gen_key(&self.tls_session).unwrap();
 
@@ -416,11 +411,11 @@ impl Connection {
         }
     }
 
-    fn tls_write(&mut self) -> io::Result<usize> {
+    pub fn tls_write(&mut self) -> io::Result<usize> {
         self.tls_session.write_tls(&mut self.socket)
     }
 
-    fn do_tls_write_and_handle_error(&mut self) {
+    pub fn do_tls_write_and_handle_error(&mut self) {
         let rc = self.tls_write();
         if rc.is_err() {
             ERROR_COUNTER.inc();
@@ -430,7 +425,7 @@ impl Connection {
         }
     }
 
-    fn register(&self, poll: &mut mio::Poll) {
+    pub fn register(&self, poll: &mut mio::Poll) {
         poll.register(
             &self.socket,
             self.token,
@@ -440,7 +435,7 @@ impl Connection {
         .unwrap();
     }
 
-    fn reregister(&self, poll: &mut mio::Poll) {
+    pub fn reregister(&self, poll: &mut mio::Poll) {
         poll.reregister(
             &self.socket,
             self.token,
@@ -450,7 +445,7 @@ impl Connection {
         .unwrap();
     }
 
-    fn event_set(&self) -> mio::Ready {
+    pub fn event_set(&self) -> mio::Ready {
         let rd = self.tls_session.wants_read();
         let wr = self.tls_session.wants_write();
 
@@ -463,11 +458,11 @@ impl Connection {
         }
     }
 
-    fn is_closed(&self) -> bool {
+    pub fn is_closed(&self) -> bool {
         self.closed
     }
 
-    fn die(&self) {
+    pub fn die(&self) {
         ERROR_COUNTER.inc();
         error!(self.logger, "forcible shutdown after timeout");
         self.socket.shutdown(Shutdown::Both)
@@ -483,79 +478,4 @@ fn pipewrite(wr: RawFd, logger: slog::Logger) {
         }
         thread::sleep(Duration::from_secs(1));
     }
-}
-
-/// start_nts_ke_server reads the configuration and starts the server.
-pub fn start_nts_ke_server(
-    config: KeServerConfig,
-) -> Result<(), Box<std::error::Error>> {
-    let logger = config.logger();
-
-    info!(logger, "Initializing keys with memcached");
-
-    let key_rotator = KeyRotator::connect(
-        String::from("/nts/nts-keys"), // prefix
-        String::from(config.memcached_url()), // memcached_url
-        config.cookie_key().clone(), // master_key
-        logger.clone(), // logger
-    ).expect("error connecting to the memcached server");
-
-
-    let keys = Arc::new(RwLock::new(key_rotator));
-    periodic_rotate(keys.clone());
-
-    // Now we initialize metrics
-    if let Some(metrics_config) = config.metrics_config.clone() {
-        let metrics = metrics_config.clone();
-        info!(logger, "spawning metrics");
-        let log_metrics = logger.new(slog::o!("component"=>"metrics"));
-        thread::spawn(move || {
-            metrics::run_metrics(metrics, &log_metrics)
-                .expect("metrics could not be run; starting ntp server failed");
-        });
-    }
-    // Time to actually run the server
-    run_server_loop(config, keys)
-}
-
-fn run_server_loop(
-    parsed_config: KeServerConfig,
-    keys: Arc<RwLock<KeyRotator>>,
-) -> Result<(), Box<std::error::Error>> {
-    let logger = parsed_config.logger().clone();
-    let mut server_config = ServerConfig::new(NoClientAuth::new());
-    server_config.versions = vec![ProtocolVersion::TLSv1_3];
-    let alpn_proto = String::from("ntske/1");
-    let alpn_bytes = alpn_proto.into_bytes();
-    server_config
-        .set_single_cert(parsed_config.tls_certs.clone(), parsed_config.tls_secret_keys[0].clone())
-        .expect("invalid key or certificate");
-    server_config.set_protocols(&[alpn_bytes]);
-    let conf = Arc::new(server_config);
-    let timeout = parsed_config.conn_timeout.unwrap_or(30);
-
-    let wg = WaitGroup::new();
-    eprintln!("parsed_config.addrs: {:?}", parsed_config.addrs());
-    for addr in parsed_config.addrs() {
-        let listener = cfsock::tcp_listener(&addr)?;
-        eprintln!("listener: {:?}", listener);
-        let mut tlsserv = NTSKeyServer::new(
-            TcpListener::from_listener(listener, &addr)?,
-            conf.clone(),
-            keys.clone(),
-            parsed_config.next_port,
-            addr.clone(),
-            logger.clone(),
-            timeout,
-        )?;
-        info!(logger, "Starting NTS-KE server over TCP/TLS on {:?}", addr);
-        let wg = wg.clone();
-        thread::spawn(move || {
-            tlsserv.listen_and_serve();
-            drop(wg);
-        });
-    }
-
-    wg.wait();
-    Ok(())
 }

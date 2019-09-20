@@ -14,18 +14,22 @@ use slog::error;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::os::unix::io::RawFd;
 use std::rc::Rc;
 use std::time::Duration;
 
 use crate::cfsock;
+use crate::error::WrapError;
 use crate::nts_ke::server::Connection;
 use crate::nts_ke::server::Timeout;
 
 use super::server::KeServer;
 use super::server::KeServerState;
 
-const LISTENER: mio::Token = mio::Token(0);
-const TIMER: mio::Token = mio::Token(1);
+/// The token used to associate the mio event with the lister event.
+const LISTENER_MIO_TOKEN: mio::Token = mio::Token(0);
+/// The token used to associate the mio event with the timer event.
+const TIMER_MIO_TOKEN: mio::Token = mio::Token(1);
 
 /// NTS-KE server internal state after the server starts.
 pub struct KeServerListener {
@@ -46,7 +50,7 @@ pub struct KeServerListener {
 
     poll: mio::Poll,
 
-    readend: std::os::unix::io::RawFd,
+    read_fd: RawFd,
 
     /// Logger.
     logger: slog::Logger,
@@ -54,6 +58,10 @@ pub struct KeServerListener {
 
 impl KeServerListener {
     /// Create a new listener with the specified address and server.
+    ///
+    /// # Errors
+    ///
+    /// All the errors here are from the kernel which we don't have to know about for now.
     pub fn new(addr: SocketAddr, server: &KeServer)
         -> Result<KeServerListener, std::io::Error>
     {
@@ -66,44 +74,55 @@ impl KeServerListener {
         // Transform a std tcp listener to a mio tcp listener.
         let mio_tcp_listener = TcpListener::from_std(std_tcp_listener)?;
 
+        // Register for the event that the listener is readble.
         poll.register(
             &mio_tcp_listener,
-            LISTENER,
+            LISTENER_MIO_TOKEN,
             mio::Ready::readable(),
             mio::PollOpt::level(),
         )?;
-        // We will periodically write to a pipe to
-        // trigger the cleanups.
-        let (readend, writend) = nix::unistd::pipe().unwrap();
+
+        // We will periodically write to a pipe to trigger the cleanups.
+        // I have to annotate the type because Rust cannot infer it. I don't know why.
+        let result: Result<(RawFd, RawFd), std::io::Error> = nix::unistd::pipe().wrap_err();
+        let (read_fd, write_fd) = result?;
+
+        // Register for an event that we can read from the pipe.
         poll.register(
-            &mio::unix::EventedFd(&readend),
-            TIMER,
+            &mio::unix::EventedFd(&read_fd),
+            TIMER_MIO_TOKEN,
             mio::Ready::readable(),
             mio::PollOpt::level(),
         )?;
-        let log_pipewrite = state.config.logger().new(
+
+        // We have to create the logger outside the thread because we need to move it into the
+        // thread.
+        let logger = state.config.logger().new(
             slog::o!("component" => "pipewrite")
         );
-        std::thread::spawn(move || pipewrite(writend, log_pipewrite));
+        std::thread::spawn(move || {
+            // Notify the parent thread every second.
+            loop {
+                // Move write_fd into the thread.
+                if let Err(error) = nix::unistd::write(write_fd, &[0; 1]) {
+                    error!(logger, "pipewrite failed with error: {}", error);
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        });
+
         Ok(KeServerListener {
             tcp_listener: mio_tcp_listener,
             connections: HashMap::new(),
             deadlines: BinaryHeap::new(),
             next_id: 2,
             addr,
+            // In the future, we may want to use the child logger instead the logger itself.
             logger: state.config.logger().clone(),
             poll,
-            readend,
+            read_fd,
+            // Create an `Rc` reference.
             state: state.clone(),
         })
-    }
-}
-
-fn pipewrite(wr: std::os::unix::io::RawFd, logger: slog::Logger) {
-    loop {
-        if let Err(e) = nix::unistd::write(wr, &[0; 1]) {
-            error!(logger, "pipewrite failed with error: {:?}", e);
-        }
-        std::thread::sleep(Duration::from_secs(1));
     }
 }

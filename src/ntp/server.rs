@@ -10,7 +10,7 @@ use slog::{error, info};
 
 use std::io::{Error, ErrorKind};
 use std::net::{
-    SocketAddr::{V6},
+    SocketAddr,
     ToSocketAddrs, UdpSocket,
 };
 use std::os::unix::io::AsRawFd;
@@ -210,8 +210,8 @@ pub fn start_ntp_server(
 
     let key_rotator = KeyRotator::connect(
         String::from("/nts/nts-keys"), // prefix
-        config.memcached_url, // memcached_url
-        config.cookie_key, // master_key
+        config.memcached_url.clone(), // memcached_url
+        config.cookie_key.clone(), // master_key
         logger.clone(), // logger
     ).expect("error connecting to the memcached server");
 
@@ -232,15 +232,15 @@ pub fn start_ntp_server(
     };
 
     let servstate = Arc::new(RwLock::new(servstate_struct));
-    match config.upstream_addr {
-        Some((host, port)) => {
+    match config.upstream_addr.clone() {
+        Some(upstream_addr) => {
             info!(logger, "connecting to upstream");
             let servstate = servstate.clone();
             let rot_logger = logger.new(slog::o!("task"=>"refereshing servstate"));
             let socket = UdpSocket::bind("127.0.0.1:0")?; // we only go to local
             socket.set_read_timeout(Some(time::Duration::from_secs(1)))?;
             thread::spawn(move || {
-                refresh_servstate(servstate, rot_logger, socket, host, port);
+                refresh_servstate(servstate, rot_logger, socket, &upstream_addr);
             });
         }
         None => {
@@ -251,18 +251,17 @@ pub fn start_ntp_server(
         }
     }
 
-    if let Some(metrics_config) = config.metrics_config {
-        let metrics = metrics_config.clone();
+    if let Some(metrics_config) = config.metrics_config.clone() {
         info!(logger, "spawning metrics");
         let log_metrics = logger.new(slog::o!("component"=>"metrics"));
         thread::spawn(move || {
-            metrics::run_metrics(metrics, &log_metrics)
+            metrics::run_metrics(metrics_config, &log_metrics)
                 .expect("metrics could not be run; starting ntp server failed");
         });
     }
 
     let wg = WaitGroup::new();
-    for addr in config.addrs {
+    for addr in config.addrs() {
         let addr = addr.to_socket_addrs().unwrap().next().unwrap();
         let socket = cfsock::udp_listen(&addr)?;
         let wg = wg.clone();
@@ -271,7 +270,7 @@ pub fn start_ntp_server(
         let servstate = servstate.clone();
         info!(logger, "Listening on: {}", socket.local_addr()?);
         let mut use_ipv4 = true;
-        if let V6(_) = addr {
+        if let SocketAddr::V6(_) = addr {
             use_ipv4 = false;
         }
         thread::spawn(move || {
@@ -499,10 +498,8 @@ fn refresh_servstate(
     servstate: Arc<RwLock<ServerState>>,
     logger: slog::Logger,
     sock: std::net::UdpSocket,
-    host: String,
-    port: u16,
+    addr: &SocketAddr,
 ) {
-    let host = host.as_str();
     loop {
         let query_packet = NtpPacket {
             header: NtpPacketHeader {
@@ -522,7 +519,7 @@ fn refresh_servstate(
             },
             exts: vec![],
         };
-        sock.connect((host, port))
+        sock.connect(addr)
             .expect("socket connection to server failed, failed to refresh server state");
         sock.send(&serialize_ntp_packet(query_packet))
             .expect("sending ntp packet to server failed, failed to refresh server state");

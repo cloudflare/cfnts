@@ -8,7 +8,6 @@ use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::io;
 use std::io::{ErrorKind, Read, Write};
-use std::net::ToSocketAddrs;
 use std::os::unix::io::{RawFd};
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -529,16 +528,15 @@ fn run_server_loop(
     let alpn_proto = String::from("ntske/1");
     let alpn_bytes = alpn_proto.into_bytes();
     server_config
-        .set_single_cert(parsed_config.tls_certs, parsed_config.tls_secret_keys[0].clone())
+        .set_single_cert(parsed_config.tls_certs.clone(), parsed_config.tls_secret_keys[0].clone())
         .expect("invalid key or certificate");
     server_config.set_protocols(&[alpn_bytes]);
     let conf = Arc::new(server_config);
     let timeout = parsed_config.conn_timeout.unwrap_or(30);
 
     let wg = WaitGroup::new();
-    eprintln!("parsed_config.addrs: {:?}", parsed_config.addrs);
-    for addr in parsed_config.addrs {
-        let addr = addr.to_socket_addrs().unwrap().next().unwrap();
+    eprintln!("parsed_config.addrs: {:?}", parsed_config.addrs());
+    for addr in parsed_config.addrs() {
         let listener = cfsock::tcp_listener(&addr)?;
         eprintln!("listener: {:?}", listener);
         let mut tlsserv = NTSKeyServer::new(
@@ -546,7 +544,7 @@ fn run_server_loop(
             conf.clone(),
             keys.clone(),
             parsed_config.next_port,
-            addr,
+            addr.clone(),
             logger.clone(),
             timeout,
         )?;

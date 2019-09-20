@@ -6,12 +6,8 @@
 
 use crossbeam::sync::WaitGroup;
 
-use mio::tcp::TcpListener;
-
 use slog::info;
 
-use std::net::ToSocketAddrs;
-use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
 use crate::cfsock;
@@ -20,7 +16,6 @@ use crate::key_rotator::KeyRotator;
 use crate::key_rotator::RotateError;
 use crate::key_rotator::periodic_rotate;
 use crate::metrics;
-use crate::nts_ke::server::NTSKeyServer;
 
 use super::listener::KeServerListener;
 
@@ -46,8 +41,8 @@ pub struct KeServerState {
 /// NTS-KE server instance.
 pub struct KeServer {
     /// State shared among listerners.
-    // We use `Rc` so that all the KeServerListener's can reference back to this object.
-    state: Rc<KeServerState>,
+    // We use `Arc` so that all the KeServerListener's can reference back to this object.
+    state: Arc<KeServerState>,
 
     // In fact, you can check if the server already started or not, but checking that this vector
     // is empty.
@@ -98,7 +93,7 @@ impl KeServer {
             server_config
         };
 
-        let state = Rc::new(KeServerState {
+        let state = Arc::new(KeServerState {
             config,
             rotator: Arc::new(RwLock::new(rotator)),
             tls_server_config: Arc::new(tls_server_config),
@@ -145,22 +140,17 @@ impl KeServer {
         let wg = WaitGroup::new();
 
         for addr in self.state.config.addrs() {
-            let addr = addr.to_socket_addrs().unwrap().next().unwrap();
-            let listener = cfsock::tcp_listener(&addr).unwrap();
-            eprintln!("listener: {:?}", listener);
-            let mut tlsserv = NTSKeyServer::new(
-                TcpListener::from_listener(listener, &addr).unwrap(),
-                self.state.tls_server_config.clone(),
-                self.state.rotator.clone(),
-                self.state.config.next_port,
-                addr,
-                logger.clone(),
-                self.state.config.timeout(),
+            let mut listener = KeServerListener::new(
+                addr.clone(),
+                &self,
             ).unwrap();
-            info!(logger, "Starting NTS-KE server over TCP/TLS on {:?}", addr);
+
+            info!(logger, "starting NTS-KE server over TCP/TLS on {}", addr);
+
             let wg = wg.clone();
+
             std::thread::spawn(move || {
-                tlsserv.listen_and_serve();
+                listener.listen_and_serve();
                 drop(wg);
             });
         }
@@ -169,7 +159,7 @@ impl KeServer {
     }
 
     /// Return the state of the server.
-    pub(super) fn state(&self) -> &Rc<KeServerState> {
+    pub(super) fn state(&self) -> &Arc<KeServerState> {
         &self.state
     }
 }

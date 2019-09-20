@@ -4,20 +4,12 @@ use prometheus::{opts, register_counter, register_int_counter, IntCounter};
 use slog::{debug, error, info};
 
 use std::cmp::{Ord, Ordering};
-use std::collections::BinaryHeap;
-use std::collections::HashMap;
 use std::io;
 use std::io::{ErrorKind, Read, Write};
-use std::os::unix::io::{RawFd};
 use std::sync::{Arc, RwLock};
-use std::thread;
-use std::time::{Duration, SystemTime};
 use std::vec::Vec;
 
-use mio::tcp::{Shutdown, TcpListener, TcpStream};
-use mio::unix::EventedFd;
-use nix::unistd;
-use nix::unistd::pipe;
+use mio::tcp::{Shutdown, TcpStream};
 use rustls::Session;
 
 use crate::cookie::{make_cookie, NTSKeys};
@@ -26,9 +18,6 @@ use crate::key_rotator::KeyRotator;
 use super::protocol::gen_key;
 use super::protocol::serialize_record;
 use super::protocol::{NtsKeRecord, NtsKeType};
-
-const LISTENER: mio::Token = mio::Token(0);
-const TIMER: mio::Token = mio::Token(1);
 
 lazy_static! {
     static ref QUERY_COUNTER: IntCounter =
@@ -110,190 +99,6 @@ impl PartialOrd for Timeout {
 impl PartialEq for Timeout {
     fn eq(&self, other: &Timeout) -> bool {
         self.deadline == other.deadline
-    }
-}
-fn gettime() -> u64 {
-    let now = SystemTime::now();
-    let diff = now.duration_since(std::time::UNIX_EPOCH);
-    diff.unwrap().as_secs()
-}
-
-pub struct NTSKeyServer {
-    server: TcpListener,
-    connections: HashMap<mio::Token, Connection>,
-    deadlines: BinaryHeap<Timeout>,
-    next_id: usize,
-    tls_config: Arc<rustls::ServerConfig>,
-    master_key: Arc<RwLock<KeyRotator>>,
-    next_port: u16,
-    listen_addr: std::net::SocketAddr,
-    logger: slog::Logger,
-    poll: mio::Poll,
-    timeout: u64,
-    readend: RawFd,
-}
-
-impl NTSKeyServer {
-    pub fn new(
-        server: TcpListener,
-        cfg: Arc<rustls::ServerConfig>,
-        master_key: Arc<RwLock<KeyRotator>>,
-        next_port: u16,
-        listen_addr: std::net::SocketAddr,
-        logger: slog::Logger,
-        timeout: u64,
-    ) -> Result<NTSKeyServer, io::Error> {
-        let poll = mio::Poll::new()?;
-        poll.register(
-            &server,
-            LISTENER,
-            mio::Ready::readable(),
-            mio::PollOpt::level(),
-        )?;
-        // We will periodically write to a pipe to
-        // trigger the cleanups.
-        let (readend, writend) = pipe().unwrap();
-        poll.register(
-            &EventedFd(&readend),
-            TIMER,
-            mio::Ready::readable(),
-            mio::PollOpt::level(),
-        )?;
-        let log_pipewrite = logger.new(slog::o!("component"=>"pipewrite"));
-        thread::spawn(move || pipewrite(writend, log_pipewrite));
-        Ok(NTSKeyServer {
-            server,
-            connections: HashMap::new(),
-            deadlines: BinaryHeap::new(),
-            next_id: 2,
-            tls_config: cfg,
-            master_key: master_key,
-            next_port: next_port,
-            listen_addr: listen_addr,
-            logger: logger,
-            poll: poll,
-            timeout: timeout,
-            readend: readend,
-        })
-    }
-
-    pub fn listen_and_serve(&mut self) {
-        let mut events = mio::Events::with_capacity(2048);
-        let mut buf = vec![0; 1];
-
-        loop {
-            self.poll.poll(&mut events, None).unwrap();
-
-            for event in events.iter() {
-                match event.token() {
-                    LISTENER => match self.accept() {
-                        Err(err) => {
-                            ERROR_COUNTER.inc();
-                            error!(self.logger, "Accept failed unrecoverably with error: {:?}", err);
-                        }
-
-                        Ok(_) => {}
-                    },
-                    TIMER => {
-                        // Time to check for expired connections.
-                        if let Err(e) = unistd::read(self.readend, &mut buf) {
-                            error!(self.logger, "unistd::read failed with error: {:?}, \
-                                    can't check for expired connections", e);
-                        }
-                        self.check_timeouts();
-                    }
-                    _ => self.conn_event(&event),
-                }
-            }
-        }
-    }
-
-    fn accept(&mut self) -> Result<(), std::io::Error> {
-        match self.server.accept() {
-            Ok((socket, addr)) => {
-                info!(self.logger, "Accepting new connection from {:?}", addr);
-
-                let tls_session = rustls::ServerSession::new(&self.tls_config);
-                let master_key = self.master_key.clone();
-
-                let token = mio::Token(self.next_id);
-                self.next_id += 1;
-                if self.next_id > 1_000_000_000 {
-                    // We wrap around at 1e9 connections, but avoid the reserved listener token.
-                    self.next_id = 2;
-                }
-
-                let timeout = Timeout {
-                    token: token,
-                    deadline: gettime().saturating_add(self.timeout),
-                };
-                self.deadlines.push(timeout);
-
-                let next_logger = self.logger.new(slog::o!("client"=> addr));
-                self.connections.insert(
-                    token,
-                    Connection::new(
-                        socket,
-                        token,
-                        tls_session,
-                        master_key,
-                        self.next_port,
-                        next_logger,
-                    ),
-                );
-                self.connections[&token].register(&mut self.poll);
-
-                Ok(())
-            }
-            Err(e) => {
-                if e.kind() != io::ErrorKind::WouldBlock {
-                    ERROR_COUNTER.inc();
-                    error!(
-                        self.logger,
-                        "encountered error while accepting connection; err={:?}", e
-                    );
-                    self.server = TcpListener::bind(&self.listen_addr)?;
-                    self.poll
-                        .register(
-                            &self.server,
-                            LISTENER,
-                            mio::Ready::readable(),
-                            mio::PollOpt::level(),
-                        )
-                        .map({ |_| () })
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-
-    fn conn_event(&mut self, event: &mio::Event) {
-        let token = event.token();
-
-        if self.connections.contains_key(&token) {
-            self.connections
-                .get_mut(&token)
-                .unwrap()
-                .ready(&mut self.poll, event);
-
-            if self.connections[&token].is_closed() {
-                self.connections.remove(&token);
-            }
-        }
-    }
-    /// check_timeouts removes the expired timeouts, looping until they are all gone.
-    /// We remove the timeout from the heap, and kill the connection if it exists.
-    fn check_timeouts(&mut self) {
-        let limit = gettime();
-        while self.deadlines.len() > 0 && self.deadlines.peek().unwrap().deadline < limit {
-            let timedout = self.deadlines.pop().unwrap();
-            if self.connections.contains_key(&timedout.token) {
-                self.connections.get_mut(&timedout.token).unwrap().die();
-                self.connections.remove(&timedout.token);
-                TIMEOUT_COUNTER.inc();
-            }
-        }
     }
 }
 
@@ -468,14 +273,5 @@ impl Connection {
         self.socket.shutdown(Shutdown::Both)
             .expect("cannot shutdown socket");
         self.closed;
-    }
-}
-
-fn pipewrite(wr: RawFd, logger: slog::Logger) {
-    loop {
-        if let Err(e) = unistd::write(wr, &[0; 1]) {
-            error!(logger, "pipewrite failed with error: {:?}", e);
-        }
-        thread::sleep(Duration::from_secs(1));
     }
 }

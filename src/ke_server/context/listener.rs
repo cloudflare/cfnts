@@ -7,16 +7,16 @@
 // TODO: Remove this when everything is used.
 #![allow(dead_code)]
 
-use mio::tcp::TcpListener;
+use mio::net::TcpListener;
 
-use slog::error;
+use slog::{error, info};
 
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::os::unix::io::RawFd;
-use std::rc::Rc;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use crate::cfsock;
 use crate::error::WrapError;
@@ -34,7 +34,7 @@ const TIMER_MIO_TOKEN: mio::Token = mio::Token(1);
 /// NTS-KE server internal state after the server starts.
 pub struct KeServerListener {
     /// Reference back to the corresponding `KeServer` state.
-    state: Rc<KeServerState>,
+    state: Arc<KeServerState>,
 
     /// TCP listener for incoming connections.
     tcp_listener: TcpListener,
@@ -125,4 +125,125 @@ impl KeServerListener {
             state: state.clone(),
         })
     }
+
+    pub fn listen_and_serve(&mut self) {
+        let mut events = mio::Events::with_capacity(2048);
+        let mut buf = vec![0; 1];
+
+        loop {
+            self.poll.poll(&mut events, None).unwrap();
+
+            for event in events.iter() {
+                match event.token() {
+                    LISTENER_MIO_TOKEN => match self.accept() {
+                        Err(err) => {
+                            error!(self.logger, "Accept failed unrecoverably with error: {:?}", err);
+                        }
+
+                        Ok(_) => {}
+                    },
+                    TIMER_MIO_TOKEN => {
+                        // Time to check for expired connections.
+                        if let Err(e) = nix::unistd::read(self.read_fd, &mut buf) {
+                            error!(self.logger, "unistd::read failed with error: {:?}, \
+                                    can't check for expired connections", e);
+                        }
+                        self.check_timeouts();
+                    }
+                    _ => self.conn_event(&event),
+                }
+            }
+        }
+    }
+
+    fn accept(&mut self) -> Result<(), std::io::Error> {
+        match self.tcp_listener.accept() {
+            Ok((socket, addr)) => {
+                info!(self.logger, "Accepting new connection from {:?}", addr);
+
+                let tls_session = rustls::ServerSession::new(&self.state.tls_server_config);
+                let rotator = self.state.rotator.clone();
+
+                let token = mio::Token(self.next_id);
+                self.next_id += 1;
+                if self.next_id > 1_000_000_000 {
+                    // We wrap around at 1e9 connections, but avoid the reserved listener token.
+                    self.next_id = 2;
+                }
+
+                let timeout = Timeout {
+                    token: token,
+                    deadline: gettime() + self.state.config.conn_timeout.unwrap(),
+                };
+                self.deadlines.push(timeout);
+
+                let next_logger = self.logger.new(slog::o!("client"=> addr));
+                self.connections.insert(
+                    token,
+                    Connection::new(
+                        socket,
+                        token,
+                        tls_session,
+                        rotator,
+                        self.state.config.next_port,
+                        next_logger,
+                    ),
+                );
+                self.connections[&token].register(&mut self.poll);
+
+                Ok(())
+            }
+            Err(e) => {
+                if e.kind() != std::io::ErrorKind::WouldBlock {
+                    error!(
+                        self.logger,
+                        "encountered error while accepting connection; err={:?}", e
+                    );
+                    self.tcp_listener = TcpListener::bind(&self.addr)?;
+                    self.poll
+                        .register(
+                            &self.tcp_listener,
+                            LISTENER_MIO_TOKEN,
+                            mio::Ready::readable(),
+                            mio::PollOpt::level(),
+                        )
+                        .map({ |_| () })
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    }
+
+    fn conn_event(&mut self, event: &mio::Event) {
+        let token = event.token();
+
+        if self.connections.contains_key(&token) {
+            self.connections
+                .get_mut(&token)
+                .unwrap()
+                .ready(&mut self.poll, event);
+
+            if self.connections[&token].is_closed() {
+                self.connections.remove(&token);
+            }
+        }
+    }
+    /// check_timeouts removes the expired timeouts, looping until they are all gone.
+    /// We remove the timeout from the heap, and kill the connection if it exists.
+    fn check_timeouts(&mut self) {
+        let limit = gettime();
+        while self.deadlines.len() > 0 && self.deadlines.peek().unwrap().deadline < limit {
+            let timedout = self.deadlines.pop().unwrap();
+            if self.connections.contains_key(&timedout.token) {
+                self.connections.get_mut(&timedout.token).unwrap().die();
+                self.connections.remove(&timedout.token);
+            }
+        }
+    }
+}
+fn gettime() -> u64 {
+    let now = SystemTime::now();
+    let diff = now.duration_since(std::time::UNIX_EPOCH);
+    diff.unwrap().as_secs()
 }

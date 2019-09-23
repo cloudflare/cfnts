@@ -49,8 +49,8 @@ pub struct NtpServerConfig {
 /// We decided to make NtpServerConfig mutable so that you can add more address after you parse
 /// the config file.
 impl NtpServerConfig {
-    /// Create a NTP server config object with the given next port, memcached url, connection
-    /// timeout, and the metrics config.
+    /// Create a NTP server config object with the given cookie key, memcached url, the metrics
+    /// config, and the upstream address port.
     pub fn new(
         cookie_key: CookieKey,
         memcached_url: String,
@@ -132,13 +132,13 @@ impl NtpServerConfig {
             Err(config::ConfigError::NotFound(_)) => None,
 
             // If it's other error, for example, unparseable error, it means that the user intended
-            // to enter the timeout but it just fails.
+            // to enter the port number but it just fails.
             Err(error) => return Err(error),
 
             Ok(val) => {
                 let port = match u16::try_from(val) {
                     Ok(val) => val,
-                    // The error will happen when the timeout is not in a range of `u64`.
+                    // The error will happen when the port number is not in a range of `u16`.
                     Err(_) => {
                         // Returning a custom message is not a good practice, but we can improve
                         // it later when we don't have to depend on `config` crate.
@@ -156,7 +156,7 @@ impl NtpServerConfig {
             Err(config::ConfigError::NotFound(_)) => None,
 
             // If it's other error, for example, unparseable error, it means that the user intended
-            // to enter the timeout but it just fails.
+            // to enter the address but it just fails.
             Err(error) => return Err(error),
 
             Ok(addr) => Some(addr),

@@ -225,7 +225,7 @@ impl NTSKeyServer {
 
                 let timeout = Timeout {
                     token: token,
-                    deadline: gettime() + self.timeout,
+                    deadline: gettime().saturating_add(self.timeout),
                 };
                 self.deadlines.push(timeout);
 

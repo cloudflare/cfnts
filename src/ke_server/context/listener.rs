@@ -20,9 +20,9 @@ use std::time::{Duration, SystemTime};
 
 use crate::cfsock;
 use crate::error::WrapError;
-use crate::nts_ke::server::Connection;
 use crate::nts_ke::server::Timeout;
 
+use super::connection::Connection;
 use super::server::KeServer;
 use super::server::KeServerState;
 

@@ -163,7 +163,9 @@ impl KeServer {
                 //
                 // If you don't want to wait for this thread to finish before returning from the
                 // `start` method, you have to look at this `unwrap` and handle it carefully.
-                cloned_listener.write().unwrap().listen_and_serve();
+                //
+                // TODO: figure what to do later when the listen fails.
+                cloned_listener.write().unwrap().listen().unwrap();
             });
 
             // Add it into the list of listeners.

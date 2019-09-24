@@ -62,9 +62,7 @@ impl KeServerListener {
     /// # Errors
     ///
     /// All the errors here are from the kernel which we don't have to know about for now.
-    pub fn new(addr: SocketAddr, server: &KeServer)
-        -> Result<KeServerListener, std::io::Error>
-    {
+    pub fn new(addr: SocketAddr, server: &KeServer) -> Result<KeServerListener, std::io::Error> {
         let state = server.state();
         let poll = mio::Poll::new()?;
 
@@ -126,110 +124,126 @@ impl KeServerListener {
         })
     }
 
-    pub fn listen_and_serve(&mut self) {
+    /// Block the thread and start polling the events.
+    pub fn listen(&mut self) -> Result<(), std::io::Error> {
+        // Holding up to 2048 events.
         let mut events = mio::Events::with_capacity(2048);
         let mut buf = vec![0; 1];
 
         loop {
-            self.poll.poll(&mut events, None).unwrap();
+            // The error returned here is from the kernel select.
+            self.poll.poll(&mut events, None)?;
 
             for event in events.iter() {
                 match event.token() {
-                    LISTENER_MIO_TOKEN => match self.accept() {
-                        Err(err) => {
-                            error!(self.logger, "Accept failed unrecoverably with error: {:?}", err);
+                    // If the tcp listener is ready to be read, start accepting a new connection.
+                    LISTENER_MIO_TOKEN => {
+                        if let Err(error) = self.accept() {
+                            error!(self.logger, "accept failed unrecoverably with error: {}",
+                                   error);
                         }
-
-                        Ok(_) => {}
                     },
+
+                    // If the timer sends us a signal to clean up the expired connections.
                     TIMER_MIO_TOKEN => {
-                        // Time to check for expired connections.
-                        if let Err(e) = nix::unistd::read(self.read_fd, &mut buf) {
-                            error!(self.logger, "unistd::read failed with error: {:?}, \
-                                    can't check for expired connections", e);
+                        if let Err(error) = nix::unistd::read(self.read_fd, &mut buf) {
+                            error!(self.logger, "unistd::read failed with error: {}, \
+                                                 can't check for expired connections", error);
                         }
                         self.check_timeouts();
                     }
-                    _ => self.conn_event(&event),
+
+                    // If it's not a listener or a timer.
+                    _ => {
+                        let token = event.token();
+
+                        if self.connections.contains_key(&token) {
+                            self.connections
+                                .get_mut(&token)
+                                .unwrap()
+                                .ready(&mut self.poll, &event);
+
+                            if self.connections[&token].is_closed() {
+                                self.connections.remove(&token);
+                            }
+                        }
+                    },
                 }
             }
         }
     }
 
+    /// Accepting a new connection. This will not block the thread, if it's called after receiving
+    /// the `LISTENER_MIO_TOKEN` event. But it will block, if it's not.
     fn accept(&mut self) -> Result<(), std::io::Error> {
-        match self.tcp_listener.accept() {
-            Ok((socket, addr)) => {
-                info!(self.logger, "Accepting new connection from {:?}", addr);
-
-                let tls_session = rustls::ServerSession::new(&self.state.tls_server_config);
-                let rotator = self.state.rotator.clone();
-
-                let token = mio::Token(self.next_id);
-                self.next_id += 1;
-                if self.next_id > 1_000_000_000 {
-                    // We wrap around at 1e9 connections, but avoid the reserved listener token.
-                    self.next_id = 2;
+        let (tcp_stream, addr) = match self.tcp_listener.accept() {
+            Ok(value) => value,
+            Err(error) => {
+                // If it's WouldBlock, just treat it like a success becaue there isn't an actual
+                // error. It's just in a non-blocking mode.
+                if error.kind() == std::io::ErrorKind::WouldBlock {
+                    return Ok(());
                 }
 
-                let timeout = Timeout {
-                    token: token,
-                    deadline: gettime() + self.state.config.conn_timeout.unwrap(),
-                };
-                self.deadlines.push(timeout);
+                // If it's not WouldBlock, it's an error.
+                error!(self.logger, "encountered error while accepting connection; err={}", error);
 
-                let next_logger = self.logger.new(slog::o!("client"=> addr));
-                self.connections.insert(
-                    token,
-                    Connection::new(
-                        socket,
-                        token,
-                        tls_session,
-                        rotator,
-                        self.state.config.next_port,
-                        next_logger,
-                    ),
-                );
-                self.connections[&token].register(&mut self.poll);
+                // TODO: I don't understand why we need another tcp listener and register a new
+                // event here. I will figure it out after I finish refactoring everything.
+                self.tcp_listener = TcpListener::bind(&self.addr)?;
+                // TODO: Ignore error first. I wil figure out what to do later if there is an
+                // error.
+                self.poll.register(
+                    &self.tcp_listener,
+                    LISTENER_MIO_TOKEN,
+                    mio::Ready::readable(),
+                    mio::PollOpt::level(),
+                )?;
 
-                Ok(())
-            }
-            Err(e) => {
-                if e.kind() != std::io::ErrorKind::WouldBlock {
-                    error!(
-                        self.logger,
-                        "encountered error while accepting connection; err={:?}", e
-                    );
-                    self.tcp_listener = TcpListener::bind(&self.addr)?;
-                    self.poll
-                        .register(
-                            &self.tcp_listener,
-                            LISTENER_MIO_TOKEN,
-                            mio::Ready::readable(),
-                            mio::PollOpt::level(),
-                        )
-                        .map({ |_| () })
-                } else {
-                    Ok(())
-                }
-            }
+                // TODO: I will figure why it returns Ok later.
+                return Ok(());
+            },
+        };
+
+        // Successfully accepting a connection.
+
+        info!(self.logger, "accepting new connection from {}", addr);
+
+        // TODO: I will refactor the following later.
+
+        let tls_session = rustls::ServerSession::new(&self.state.tls_server_config);
+        let rotator = self.state.rotator.clone();
+
+        let token = mio::Token(self.next_id);
+        self.next_id += 1;
+        if self.next_id > 1_000_000_000 {
+            // We wrap around at 1e9 connections, but avoid the reserved listener token.
+            self.next_id = 2;
         }
+
+        let timeout = Timeout {
+            token: token,
+            deadline: gettime().saturating_add(self.state.config.timeout()),
+        };
+        self.deadlines.push(timeout);
+
+        let next_logger = self.logger.new(slog::o!("client"=> addr));
+        self.connections.insert(
+            token,
+            Connection::new(
+                tcp_stream,
+                token,
+                tls_session,
+                rotator,
+                self.state.config.next_port,
+                next_logger,
+            ),
+        );
+        self.connections[&token].register(&mut self.poll);
+        Ok(())
     }
 
-    fn conn_event(&mut self, event: &mio::Event) {
-        let token = event.token();
-
-        if self.connections.contains_key(&token) {
-            self.connections
-                .get_mut(&token)
-                .unwrap()
-                .ready(&mut self.poll, event);
-
-            if self.connections[&token].is_closed() {
-                self.connections.remove(&token);
-            }
-        }
-    }
-    /// check_timeouts removes the expired timeouts, looping until they are all gone.
+    /// Removes the expired timeouts, looping until they are all gone.
     /// We remove the timeout from the heap, and kill the connection if it exists.
     fn check_timeouts(&mut self) {
         let limit = gettime();
@@ -242,6 +256,7 @@ impl KeServerListener {
         }
     }
 }
+
 fn gettime() -> u64 {
     let now = SystemTime::now();
     let diff = now.duration_since(std::time::UNIX_EPOCH);

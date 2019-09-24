@@ -58,5 +58,8 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
     };
 
     // Start listening for incoming connections.
-    server.start();
+    if let Err(error) = server.start() {
+        eprintln!("starting NTS-KE server failed: {}", error);
+        process::exit(1);
+    }
 }

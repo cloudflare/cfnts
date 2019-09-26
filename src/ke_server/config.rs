@@ -255,8 +255,8 @@ impl KeServerConfig {
 
         // Resolves the connection timeout.
         let timeout = match settings.get_int("conn_timeout") {
-            // If it's a not-found error, we just set it to the default value of u64::max_value().
-            Err(config::ConfigError::NotFound(_)) => u64::max_value(),
+            // If it's a not-found error, we just set it to the default value of 30 seconds.
+            Err(config::ConfigError::NotFound(_)) => 30,
 
             // If it's other error, for example, unparseable error, it means that the user intended
             // to enter the timeout but it just fails.

@@ -155,7 +155,7 @@ impl KeServer {
                 self.state.config.next_port,
                 addr,
                 logger.clone(),
-                self.state.config.conn_timeout.unwrap(),
+                self.state.config.timeout(),
             ).unwrap();
             info!(logger, "Starting NTS-KE server over TCP/TLS on {:?}", addr);
             let wg = wg.clone();

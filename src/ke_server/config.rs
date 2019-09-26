@@ -41,7 +41,8 @@ pub struct KeServerConfig {
     /// The initial cookie key for the NTS-KE server.
     cookie_key: CookieKey,
 
-    pub conn_timeout: Option<u64>,
+    // If you don't to have a timeout, just set it to a very high value.
+    timeout: u64,
 
     /// The logger that will be used throughout the application, while the server is running.
     /// This property is mandatory because logging is very important for debugging.
@@ -63,7 +64,7 @@ impl KeServerConfig {
     /// Create a NTS-KE server config object with the given next port, memcached url, connection
     /// timeout, and the metrics config.
     pub fn new(
-        conn_timeout: Option<u64>,
+        timeout: u64,
         cookie_key: CookieKey,
         memcached_url: String,
         metrics_config: Option<MetricsConfig>,
@@ -85,7 +86,7 @@ impl KeServerConfig {
 
             // From parameters.
             cookie_key,
-            conn_timeout,
+            timeout,
             memcached_url,
             metrics_config,
             next_port,
@@ -134,6 +135,11 @@ impl KeServerConfig {
     /// Return the memcached url of the config.
     pub fn memcached_url(&self) -> &str {
         &self.memcached_url
+    }
+
+    /// Return the connection timeout of the config.
+    pub fn timeout(&self) -> u64 {
+        self.timeout
     }
 
     /// Import TLS certificates from a file.
@@ -248,16 +254,16 @@ impl KeServerConfig {
         // interface. Please don't be surprised :)
 
         // Resolves the connection timeout.
-        let conn_timeout = match settings.get_int("conn_timeout") {
-            // If it's a not-found error, we can just leave it empty.
-            Err(config::ConfigError::NotFound(_)) => None,
+        let timeout = match settings.get_int("conn_timeout") {
+            // If it's a not-found error, we just set it to the default value of 30 seconds.
+            Err(config::ConfigError::NotFound(_)) => 30,
 
             // If it's other error, for example, unparseable error, it means that the user intended
             // to enter the timeout but it just fails.
             Err(error) => return Err(error),
 
             Ok(val) => {
-                let timeout = match u64::try_from(val) {
+                match u64::try_from(val) {
                     Ok(val) => val,
                     // The error will happen when the timeout is not in a range of `u64`.
                     Err(_) => {
@@ -267,8 +273,7 @@ impl KeServerConfig {
                             String::from("the connection timeout is not a valid u64")
                         ));
                     },
-                };
-                Some(timeout)
+                }
             },
         };
 
@@ -287,7 +292,7 @@ impl KeServerConfig {
         let cookie_key = CookieKey::parse(&cookie_key_filename).wrap_err()?;
 
         let mut config = KeServerConfig::new(
-            conn_timeout,
+            timeout,
             cookie_key,
             memcached_url,
             metrics_config,

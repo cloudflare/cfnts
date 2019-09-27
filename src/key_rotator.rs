@@ -218,7 +218,7 @@ impl KeyRotator {
             // The timestamp at the beginning of the period.
             let epoch = period_number * self.duration;
 
-            let memcached_key = format!("{}/{}", self.prefix, period_number);
+            let memcached_key = format!("{}/{}", self.prefix, epoch);
             let memcached_value: Option<Vec<u8>> = client.get(&memcached_key)?;
 
             let key_id = KeyId::from_epoch(epoch);

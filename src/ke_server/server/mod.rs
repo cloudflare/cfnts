@@ -46,7 +46,7 @@ pub struct KeServer {
 
     /// List of listeners associated with the server.
     /// Each listener is associated with each address in the config. You can check if the server
-    /// already started or not, but checking that this vector is empty.
+    /// already started or not by checking that this vector is empty.
     // We use `Arc` because the listener will listen in another thread.
     listeners: Vec<Arc<RwLock<KeServerListener>>>,
 }

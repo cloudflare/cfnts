@@ -5,10 +5,10 @@
 //! NTS-KE server implementation.
 
 mod config;
-mod context;
+mod server;
 
 pub use self::config::KeServerConfig;
-pub use self::context::KeServer;
+pub use self::server::KeServer;
 
 use std::process;
 

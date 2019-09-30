@@ -23,8 +23,8 @@ use crate::error::WrapError;
 use crate::nts_ke::server::Timeout;
 
 use super::connection::Connection;
-use super::server::KeServer;
-use super::server::KeServerState;
+use super::KeServer;
+use super::KeServerState;
 
 /// The token used to associate the mio event with the lister event.
 const LISTENER_MIO_TOKEN: mio::Token = mio::Token(0);

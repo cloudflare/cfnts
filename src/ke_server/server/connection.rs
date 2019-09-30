@@ -113,7 +113,7 @@ impl Connection {
             self.do_tls_write_and_handle_error();
         }
 
-        if self.closing && !self.tls_session.wants_write() {
+        if self.closing {
             let _ = self.socket.shutdown(Shutdown::Both);
             self.closed = true;
         } else {

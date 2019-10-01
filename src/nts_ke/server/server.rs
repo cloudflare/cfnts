@@ -4,38 +4,35 @@
 
 //! NTS-KE server instantiation.
 
-mod connection;
-mod listener;
-
 use slog::info;
 
 use std::sync::{Arc, RwLock};
 
-use crate::ke_server::KeServerConfig;
 use crate::key_rotator::KeyRotator;
 use crate::key_rotator::RotateError;
 use crate::key_rotator::periodic_rotate;
 use crate::metrics;
 
-use self::listener::KeServerListener;
+use super::config::KeServerConfig;
+use super::listener::KeServerListener;
 
 /// NTS-KE server state that will be shared among listeners.
-struct KeServerState {
+pub(super) struct KeServerState {
     /// Configuration for the NTS-KE server.
     // You can see that I don't expand the config's properties here because, by keeping it like
     // this, we will know what is the config and what is the state.
-    pub(self) config: KeServerConfig,
+    pub(super) config: KeServerConfig,
 
     /// Key rotator. Read this property to get latest keys.
     // The internal state of this rotator can be changed even if the KeServer instance is
     // immutable. That's because of the nature of RwLock. This property is normally used by
     // KeServer to read the state only.
-    pub(self) rotator: Arc<RwLock<KeyRotator>>,
+    pub(super) rotator: Arc<RwLock<KeyRotator>>,
 
     /// TLS server configuration which will be used among listeners.
     // We use `Arc` here so that every thread can read the config, but the drawback of using `Arc`
     // is that it uses garbage collection.
-    pub(self) tls_server_config: Arc<rustls::ServerConfig>,
+    pub(super) tls_server_config: Arc<rustls::ServerConfig>,
 }
 
 /// NTS-KE server instance.
@@ -187,7 +184,7 @@ impl KeServer {
     }
 
     /// Return the state of the server.
-    pub(self) fn state(&self) -> &Arc<KeServerState> {
+    pub(super) fn state(&self) -> &Arc<KeServerState> {
         &self.state
     }
 }

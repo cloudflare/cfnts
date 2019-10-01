@@ -2,15 +2,11 @@
 // Copyright (c) 2019, Cloudflare. All rights reserved.
 // See LICENSE for licensing information.
 
-//! NTS-KE server implementation.
-
-mod config;
-mod server;
-
-pub use self::config::KeServerConfig;
-pub use self::server::KeServer;
+//! The ke-server subcommand.
 
 use std::process;
+
+use crate::nts_ke::server::{KeServerConfig, KeServer};
 
 /// Get a configuration file path for `ke-server`.
 ///

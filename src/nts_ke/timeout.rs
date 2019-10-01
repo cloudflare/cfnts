@@ -1,16 +1,4 @@
-use lazy_static::lazy_static;
-use prometheus::{opts, register_counter, register_int_counter, IntCounter};
-
 use std::cmp::{Ord, Ordering};
-
-lazy_static! {
-    static ref QUERY_COUNTER: IntCounter =
-        register_int_counter!("nts_queries_total", "Number of NTS requests").unwrap();
-    static ref ERROR_COUNTER: IntCounter =
-        register_int_counter!("nts_errors_total", "Number of errors").unwrap();
-    static ref TIMEOUT_COUNTER: IntCounter =
-        register_int_counter!("nts_timeouts_total", "Number of connections that time out").unwrap();
-}
 
 /// We store timeouts in a heap. This structure contains the deadline
 /// and the token by which the connection is identified.

@@ -14,7 +14,7 @@ use super::protocol;
 use super::protocol::{DeserializeError::TooShort, *};
 
 use self::ClientError::*;
-use crate::client::ClientConfig;
+use crate::sub_command::client::ClientConfig;
 use crate::cookie::NTSKeys;
 
 type Cookie = Vec<u8>;

@@ -2,14 +2,11 @@
 // Copyright (c) 2019, Cloudflare. All rights reserved.
 // See LICENSE for licensing information.
 
-//! NTP server implementation.
-
-mod config;
-
-pub use self::config::NtpServerConfig;
+//! The ntp-server subcommand.
 
 use std::process;
 
+use crate::ntp::server::NtpServerConfig;
 use crate::ntp::server::start_ntp_server;
 
 /// Get a configuration file path for `ntp-server`.

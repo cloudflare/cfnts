@@ -11,16 +11,14 @@ extern crate slog_stdlog;
 extern crate sloggers;
 
 mod cfsock;
-mod client;
 mod cmd;
 mod cookie;
 mod error;
-mod ke_server;
 mod key_rotator;
 mod metrics;
 mod ntp;
-mod ntp_server;
 mod nts_ke;
+mod sub_command;
 
 use sloggers::terminal::{Destination, TerminalLoggerBuilder};
 use sloggers::types::Severity;
@@ -75,12 +73,12 @@ fn main() {
     }
 
     if let Some(ke_server_matches) = matches.subcommand_matches("ke-server") {
-        ke_server::run(ke_server_matches);
+        sub_command::ke_server::run(ke_server_matches);
     }
     if let Some(ntp_server_matches) = matches.subcommand_matches("ntp-server") {
-        ntp_server::run(ntp_server_matches);
+        sub_command::ntp_server::run(ntp_server_matches);
     }
     if let Some(client_matches) = matches.subcommand_matches("client") {
-        client::run(client_matches);
+        sub_command::client::run(client_matches);
     }
 }

@@ -2,7 +2,7 @@
 // Copyright (c) 2019, Cloudflare. All rights reserved.
 // See LICENSE for licensing information.
 
-//! NTS client implementation.
+//! The client subcommand.
 
 use slog::debug;
 

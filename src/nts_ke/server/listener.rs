@@ -14,12 +14,10 @@ use slog::{error, info};
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::os::unix::io::RawFd;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 
 use crate::cfsock;
-use crate::error::WrapError;
 use crate::nts_ke::timeout::Timeout;
 
 use super::connection::Connection;
@@ -28,8 +26,6 @@ use super::server::KeServerState;
 
 /// The token used to associate the mio event with the lister event.
 const LISTENER_MIO_TOKEN: mio::Token = mio::Token(0);
-/// The token used to associate the mio event with the timer event.
-const TIMER_MIO_TOKEN: mio::Token = mio::Token(1);
 
 /// NTS-KE server internal state after the server starts.
 pub struct KeServerListener {
@@ -49,8 +45,6 @@ pub struct KeServerListener {
     addr: SocketAddr,
 
     poll: mio::Poll,
-
-    read_fd: RawFd,
 
     /// Logger.
     logger: slog::Logger,
@@ -80,35 +74,6 @@ impl KeServerListener {
             mio::PollOpt::level(),
         )?;
 
-        // We will periodically write to a pipe to trigger the cleanups.
-        // I have to annotate the type because Rust cannot infer it. I don't know why.
-        let result: Result<(RawFd, RawFd), std::io::Error> = nix::unistd::pipe().wrap_err();
-        let (read_fd, write_fd) = result?;
-
-        // Register for an event that we can read from the pipe.
-        poll.register(
-            &mio::unix::EventedFd(&read_fd),
-            TIMER_MIO_TOKEN,
-            mio::Ready::readable(),
-            mio::PollOpt::level(),
-        )?;
-
-        // We have to create the logger outside the thread because we need to move it into the
-        // thread.
-        let logger = state.config.logger().new(
-            slog::o!("component" => "pipewrite")
-        );
-        std::thread::spawn(move || {
-            // Notify the parent thread every second.
-            loop {
-                // Move write_fd into the thread.
-                if let Err(error) = nix::unistd::write(write_fd, &[0; 1]) {
-                    error!(logger, "pipewrite failed with error: {}", error);
-                }
-                std::thread::sleep(Duration::from_secs(1));
-            }
-        });
-
         Ok(KeServerListener {
             tcp_listener: mio_tcp_listener,
             connections: HashMap::new(),
@@ -118,8 +83,7 @@ impl KeServerListener {
             // In the future, we may want to use the child logger instead the logger itself.
             logger: state.config.logger().clone(),
             poll,
-            read_fd,
-            // Create an `Rc` reference.
+            // Create an `Arc` reference.
             state: state.clone(),
         })
     }
@@ -128,7 +92,6 @@ impl KeServerListener {
     pub fn listen(&mut self) -> Result<(), std::io::Error> {
         // Holding up to 2048 events.
         let mut events = mio::Events::with_capacity(2048);
-        let mut buf = vec![0; 1];
 
         loop {
             // The error returned here is from the kernel select.
@@ -138,23 +101,16 @@ impl KeServerListener {
                 match event.token() {
                     // If the tcp listener is ready to be read, start accepting a new connection.
                     LISTENER_MIO_TOKEN => {
+                        self.check_timeouts();
                         if let Err(error) = self.accept() {
                             error!(self.logger, "accept failed unrecoverably with error: {}",
                                    error);
                         }
                     },
 
-                    // If the timer sends us a signal to clean up the expired connections.
-                    TIMER_MIO_TOKEN => {
-                        if let Err(error) = nix::unistd::read(self.read_fd, &mut buf) {
-                            error!(self.logger, "unistd::read failed with error: {}, \
-                                                 can't check for expired connections", error);
-                        }
-                        self.check_timeouts();
-                    }
-
                     // If it's not a listener or a timer.
                     _ => {
+                        self.check_timeouts();
                         let token = event.token();
 
                         if self.connections.contains_key(&token) {

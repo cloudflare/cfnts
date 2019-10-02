@@ -8,21 +8,25 @@ use mio::net::TcpListener;
 
 use slog::{error, info};
 
+use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use crate::cfsock;
-use crate::nts_ke::timeout::Timeout;
 
 use super::connection::Connection;
 use super::server::KeServer;
 use super::server::KeServerState;
 
+const LISTENER_MIO_TOKEN_ID: usize = 0;
+const CONNECTION_MIO_TOKEN_ID_MIN: usize = LISTENER_MIO_TOKEN_ID + 1;
+const CONNECTION_MIO_TOKEN_ID_MAX: usize = usize::max_value();
+
 /// The token used to associate the mio event with the lister event.
-const LISTENER_MIO_TOKEN: mio::Token = mio::Token(0);
+const LISTENER_MIO_TOKEN: mio::Token = mio::Token(LISTENER_MIO_TOKEN_ID);
 
 /// NTS-KE server internal state after the server starts.
 pub struct KeServerListener {
@@ -35,9 +39,12 @@ pub struct KeServerListener {
     /// List of connections accepted by this listener.
     connections: HashMap<mio::Token, Connection>,
 
-    deadlines: BinaryHeap<Timeout>,
+    /// Deadline indices for connections.
+    // We use `Reverse` because we want a min heap.
+    deadlines: BinaryHeap<Reverse<(SystemTime, mio::Token)>>,
 
-    next_id: usize,
+    /// The next mio token id for a new connection.
+    next_conn_token_id: usize,
 
     addr: SocketAddr,
 
@@ -48,12 +55,12 @@ pub struct KeServerListener {
 }
 
 impl KeServerListener {
-    /// Create a new listener with the specified address and server.
+    /// Bind a new listener with the specified address and server.
     ///
     /// # Errors
     ///
     /// All the errors here are from the kernel which we don't have to know about for now.
-    pub fn new(addr: SocketAddr, server: &KeServer) -> Result<KeServerListener, std::io::Error> {
+    pub fn bind(addr: SocketAddr, server: &KeServer) -> Result<KeServerListener, std::io::Error> {
         let state = server.state();
         let poll = mio::Poll::new()?;
 
@@ -75,7 +82,7 @@ impl KeServerListener {
             tcp_listener: mio_tcp_listener,
             connections: HashMap::new(),
             deadlines: BinaryHeap::new(),
-            next_id: 2,
+            next_conn_token_id: CONNECTION_MIO_TOKEN_ID_MIN,
             addr,
             // In the future, we may want to use the child logger instead the logger itself.
             logger: state.config.logger().clone(),
@@ -110,9 +117,8 @@ impl KeServerListener {
 
                 // If the event is not the listener event, it must be a connection event.
 
-                // The connection associated with the token should exist. If it does not, we just
-                // ignore it for now, but we may alert to alert it as a bug or something in the
-                // future.
+                // The connection associated with the token may not exist for some reason. In which
+                // case, we just ignore it.
                 if let Some(connection) = self.connections.get_mut(&token) {
                     connection.ready(&mut self.poll, &event);
 
@@ -160,25 +166,23 @@ impl KeServerListener {
 
         info!(self.logger, "accepting new connection from {}", addr);
 
+        let token = mio::Token(self.next_conn_token_id);
+        self.increment_next_conn_token_id();
+
+        let timeout_duration = Duration::new(self.state.config.timeout(), 0);
+
+        // If the timeout is so large that we cannot put it in SystemTime, we can assume that
+        // it doesn't have a timeout and just don't add it into the map.
+        if let Some(timeout_systime) = SystemTime::now().checked_add(timeout_duration) {
+            self.deadlines.push(Reverse((timeout_systime, token)));
+        }
+
         // TODO: I will refactor the following later.
 
         let tls_session = rustls::ServerSession::new(&self.state.tls_server_config);
         let rotator = self.state.rotator.clone();
 
-        let token = mio::Token(self.next_id);
-        self.next_id += 1;
-        if self.next_id > 1_000_000_000 {
-            // We wrap around at 1e9 connections, but avoid the reserved listener token.
-            self.next_id = 2;
-        }
-
-        let timeout = Timeout {
-            token: token,
-            deadline: gettime().saturating_add(self.state.config.timeout()),
-        };
-        self.deadlines.push(timeout);
-
-        let next_logger = self.logger.new(slog::o!("client"=> addr));
+        let next_logger = self.logger.new(slog::o!("client" => addr));
         self.connections.insert(
             token,
             Connection::new(
@@ -194,22 +198,45 @@ impl KeServerListener {
         Ok(())
     }
 
+    /// Increment next_conn_token_id.
+    fn increment_next_conn_token_id(&mut self) {
+        match self.next_conn_token_id.checked_add(1) {
+            Some(value) => self.next_conn_token_id = value,
+            // If it overflows just set it to the minimum value.
+            None => self.next_conn_token_id = CONNECTION_MIO_TOKEN_ID_MIN,
+        }
+
+        // If it exceeds the maximum, we also set it to the minimum value.
+        if self.next_conn_token_id > CONNECTION_MIO_TOKEN_ID_MAX {
+            self.next_conn_token_id = CONNECTION_MIO_TOKEN_ID_MIN;
+        }
+    }
+
     /// Closes the expired timeouts, looping until they are all gone.
     /// We remove the timeout from the heap, and kill the connection if it exists.
     fn close_expired_connections(&mut self) {
-        let limit = gettime();
-        while self.deadlines.len() > 0 && self.deadlines.peek().unwrap().deadline < limit {
-            let timedout = self.deadlines.pop().unwrap();
-            if self.connections.contains_key(&timedout.token) {
-                self.connections.get_mut(&timedout.token).unwrap().die();
-                self.connections.remove(&timedout.token);
+        let now = SystemTime::now();
+
+        while let Some(earliest) = self.deadlines.peek() {
+            let Reverse((deadline, token)) = earliest;
+
+            if deadline < &now {
+                // If the deadline is already elapsed, close the connection and pop the heap.
+                // The connection associated with the token may not exist because, when we close
+                // the connection, it's not possible to find an entry in the heap. In which case,
+                // we can just pop the deadline heap.
+                if let Some(connection) = self.connections.remove(&token) {
+                    connection.die();
+                }
+                self.deadlines.pop();
+
+                // In this case, this means that there may be more elapsed deadline. Continue the
+                // loop.
+            } else {
+                // If not, it means there is no more elapsed deadline in the heap. So we can just
+                // stop the loop.
+                break;
             }
         }
     }
-}
-
-fn gettime() -> u64 {
-    let now = SystemTime::now();
-    let diff = now.duration_since(std::time::UNIX_EPOCH);
-    diff.unwrap().as_secs()
 }

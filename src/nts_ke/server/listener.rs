@@ -4,9 +4,6 @@
 
 //! NTS-KE server listener.
 
-// TODO: Remove this when everything is used.
-#![allow(dead_code)]
-
 use mio::net::TcpListener;
 
 use slog::{error, info};
@@ -98,32 +95,30 @@ impl KeServerListener {
             self.poll.poll(&mut events, None)?;
 
             for event in events.iter() {
-                match event.token() {
-                    // If the tcp listener is ready to be read, start accepting a new connection.
-                    LISTENER_MIO_TOKEN => {
-                        self.check_timeouts();
-                        if let Err(error) = self.accept() {
-                            error!(self.logger, "accept failed unrecoverably with error: {}",
-                                   error);
-                        }
-                    },
+                // Close all expired connections.
+                self.close_expired_connections();
+                let token = event.token();
 
-                    // If it's not a listener or a timer.
-                    _ => {
-                        self.check_timeouts();
-                        let token = event.token();
+                // If the event is the listener event.
+                if token == LISTENER_MIO_TOKEN {
+                    // Start accepting a new connection.
+                    if let Err(error) = self.accept() {
+                        error!(self.logger, "accept failed unrecoverably with error: {}", error);
+                    }
+                    continue;
+                };
 
-                        if self.connections.contains_key(&token) {
-                            self.connections
-                                .get_mut(&token)
-                                .unwrap()
-                                .ready(&mut self.poll, &event);
+                // If the event is not the listener event, it must be a connection event.
 
-                            if self.connections[&token].is_closed() {
-                                self.connections.remove(&token);
-                            }
-                        }
-                    },
+                // The connection associated with the token should exist. If it does not, we just
+                // ignore it for now, but we may alert to alert it as a bug or something in the
+                // future.
+                if let Some(connection) = self.connections.get_mut(&token) {
+                    connection.ready(&mut self.poll, &event);
+
+                    if connection.is_closed() {
+                        self.connections.remove(&token);
+                    }
                 }
             }
         }
@@ -199,9 +194,9 @@ impl KeServerListener {
         Ok(())
     }
 
-    /// Removes the expired timeouts, looping until they are all gone.
+    /// Closes the expired timeouts, looping until they are all gone.
     /// We remove the timeout from the heap, and kill the connection if it exists.
-    fn check_timeouts(&mut self) {
+    fn close_expired_connections(&mut self) {
         let limit = gettime();
         while self.deadlines.len() > 0 && self.deadlines.peek().unwrap().deadline < limit {
             let timedout = self.deadlines.pop().unwrap();

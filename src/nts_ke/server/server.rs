@@ -4,28 +4,20 @@
 
 //! NTS-KE server instantiation.
 
-use crossbeam::sync::WaitGroup;
-
-use mio::tcp::TcpListener;
-
 use slog::info;
 
-use std::net::ToSocketAddrs;
-use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
-use crate::cfsock;
-use crate::ke_server::KeServerConfig;
 use crate::key_rotator::KeyRotator;
 use crate::key_rotator::RotateError;
 use crate::key_rotator::periodic_rotate;
 use crate::metrics;
-use crate::nts_ke::server::NTSKeyServer;
 
+use super::config::KeServerConfig;
 use super::listener::KeServerListener;
 
 /// NTS-KE server state that will be shared among listeners.
-pub struct KeServerState {
+pub(super) struct KeServerState {
     /// Configuration for the NTS-KE server.
     // You can see that I don't expand the config's properties here because, by keeping it like
     // this, we will know what is the config and what is the state.
@@ -46,14 +38,14 @@ pub struct KeServerState {
 /// NTS-KE server instance.
 pub struct KeServer {
     /// State shared among listerners.
-    // We use `Rc` so that all the KeServerListener's can reference back to this object.
-    state: Rc<KeServerState>,
+    // We use `Arc` so that all the KeServerListener's can reference back to this object.
+    state: Arc<KeServerState>,
 
-    // In fact, you can check if the server already started or not, but checking that this vector
-    // is empty.
-    // TODO: Remove this when it is used.
-    #[allow(dead_code)]
-    listeners: Vec<KeServerListener>,
+    /// List of listeners associated with the server.
+    /// Each listener is associated with each address in the config. You can check if the server
+    /// already started or not by checking that this vector is empty.
+    // We use `Arc` because the listener will listen in another thread.
+    listeners: Vec<Arc<RwLock<KeServerListener>>>,
 }
 
 impl KeServer {
@@ -98,7 +90,7 @@ impl KeServer {
             server_config
         };
 
-        let state = Rc::new(KeServerState {
+        let state = Arc::new(KeServerState {
             config,
             rotator: Arc::new(RwLock::new(rotator)),
             tls_server_config: Arc::new(tls_server_config),
@@ -111,7 +103,7 @@ impl KeServer {
     }
 
     /// Start the server.
-    pub fn start(&mut self) {
+    pub fn start(&mut self) -> Result<(), std::io::Error> {
         let logger = self.state.config.logger();
 
         // Side-effect. Logging.
@@ -138,38 +130,61 @@ impl KeServer {
             });
         }
 
-        // TODO: I will refactor the following later.
-
-        eprintln!("config.addrs: {:?}", self.state.config.addrs());
-
-        let wg = WaitGroup::new();
+        // For each address in the config, we will create a listener that will listen on that
+        // address. After the creation, we will create another thread and start listening inside
+        // that thread.
 
         for addr in self.state.config.addrs() {
-            let addr = addr.to_socket_addrs().unwrap().next().unwrap();
-            let listener = cfsock::tcp_listener(&addr).unwrap();
-            eprintln!("listener: {:?}", listener);
-            let mut tlsserv = NTSKeyServer::new(
-                TcpListener::from_listener(listener, &addr).unwrap(),
-                self.state.tls_server_config.clone(),
-                self.state.rotator.clone(),
-                self.state.config.next_port,
-                addr,
-                logger.clone(),
-                self.state.config.timeout(),
-            ).unwrap();
-            info!(logger, "Starting NTS-KE server over TCP/TLS on {:?}", addr);
-            let wg = wg.clone();
-            std::thread::spawn(move || {
-                tlsserv.listen_and_serve();
-                drop(wg);
-            });
+            // Side-effect. Logging.
+            info!(logger, "starting NTS-KE server over TCP/TLS on {}", addr);
+
+            // Instantiate a listener.
+            // If there is an error here just return an error immediately so that we don't have to
+            // start a thread for other address.
+            let listener = KeServerListener::new(addr.clone(), &self)?;
+
+            // It needs to be referenced by this thread and the new thread.
+            let atomic_listener = Arc::new(RwLock::new(listener));
+
+            self.listeners.push(atomic_listener);
         }
 
-        wg.wait();
+        // Join handles for the listeners.
+        let mut handles = Vec::new();
+
+        for listener in self.listeners.iter() {
+            // The listener reference that will be moved into the thread.
+            let cloned_listener = listener.clone();
+
+            let handle = std::thread::spawn(move || {
+                // Unwrapping should be fine here because there is no a write lock while we are
+                // trying to lock it and we will wait for the thread to finish before returning
+                // from this `start` method.
+                //
+                // If you don't want to wait for this thread to finish before returning from the
+                // `start` method, you have to look at this `unwrap` and handle it carefully.
+                //
+                // TODO: figure what to do later when the listen fails.
+                cloned_listener.write().unwrap().listen().unwrap();
+            });
+
+            // Add it into the list of listeners.
+            handles.push(handle);
+        }
+
+        // We need to wait for the listeners to finish. If you don't want to wait for the listeners
+        // anymore, please don't forget to take care an `unwrap` in the thread a few lines above.
+        for handle in handles {
+            // We don't care it's a normal exit or it's a panic from the thread, so we just ignore
+            // the result here.
+            let _ = handle.join();
+        }
+
+        Ok(())
     }
 
     /// Return the state of the server.
-    pub(super) fn state(&self) -> &Rc<KeServerState> {
+    pub(super) fn state(&self) -> &Arc<KeServerState> {
         &self.state
     }
 }

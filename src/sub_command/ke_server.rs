@@ -2,15 +2,11 @@
 // Copyright (c) 2019, Cloudflare. All rights reserved.
 // See LICENSE for licensing information.
 
-//! NTS-KE server implementation.
-
-mod config;
-mod context;
-
-pub use self::config::KeServerConfig;
-pub use self::context::KeServer;
+//! The ke-server subcommand.
 
 use std::process;
+
+use crate::nts_ke::server::{KeServerConfig, KeServer};
 
 /// Get a configuration file path for `ke-server`.
 ///
@@ -58,5 +54,8 @@ pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
     };
 
     // Start listening for incoming connections.
-    server.start();
+    if let Err(error) = server.start() {
+        eprintln!("starting NTS-KE server failed: {}", error);
+        process::exit(1);
+    }
 }

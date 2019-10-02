@@ -1,5 +1,5 @@
 use crate::cfsock;
-use crate::ntp_server::NtpServerConfig;
+use super::config::NtpServerConfig;
 use crate::cookie::{eat_cookie, get_keyid, make_cookie, NTSKeys, COOKIE_SIZE};
 use crate::metrics;
 use crate::key_rotator::{periodic_rotate, KeyRotator};
@@ -31,8 +31,8 @@ use nix::sys::socket::{
 use nix::sys::time::{TimeVal, TimeValLike};
 use nix::sys::uio::IoVec;
 
-use super::protocol;
-use super::protocol::{
+use crate::ntp::protocol;
+use crate::ntp::protocol::{
     extract_extension, has_extension, is_nts_packet, parse_ntp_packet, parse_nts_packet,
     serialize_header, serialize_ntp_packet, serialize_nts_packet, LeapState, LeapState::*,
     NtpExtension, NtpExtensionType::NTSCookie, NtpExtensionType::UniqueIdentifier, NtpPacket,

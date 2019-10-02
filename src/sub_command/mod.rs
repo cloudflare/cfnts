@@ -2,7 +2,8 @@
 // Copyright (c) 2019, Cloudflare. All rights reserved.
 // See LICENSE for licensing information.
 
-mod listener;
-mod server;
+//! Subcommand collections.
 
-pub use server::KeServer;
+pub mod client;
+pub mod ke_server;
+pub mod ntp_server;

@@ -23,12 +23,14 @@ use super::server::KeServerState;
 
 const LISTENER_MIO_TOKEN_ID: usize = 0;
 const CONNECTION_MIO_TOKEN_ID_MIN: usize = LISTENER_MIO_TOKEN_ID + 1;
-const CONNECTION_MIO_TOKEN_ID_MAX: usize = usize::max_value();
+// `usize::max_value()` is reserved for mio internal use, so we need to minus one here.
+const CONNECTION_MIO_TOKEN_ID_MAX: usize = usize::max_value() - 1;
 
 /// The token used to associate the mio event with the lister event.
 const LISTENER_MIO_TOKEN: mio::Token = mio::Token(LISTENER_MIO_TOKEN_ID);
 
-/// NTS-KE server internal state after the server starts.
+/// NTS-KE server internal listener for a specific listened address.
+/// One listener will correspond to one kernel listening socket.
 pub struct KeServerListener {
     /// Reference back to the corresponding `KeServer` state.
     state: Arc<KeServerState>,
@@ -46,8 +48,10 @@ pub struct KeServerListener {
     /// The next mio token id for a new connection.
     next_conn_token_id: usize,
 
+    /// Address and port that this listener will listen to.
     addr: SocketAddr,
 
+    /// Polling object from mio.
     poll: mio::Poll,
 
     /// Logger.
@@ -70,7 +74,7 @@ impl KeServerListener {
         // Transform a std tcp listener to a mio tcp listener.
         let mio_tcp_listener = TcpListener::from_std(std_tcp_listener)?;
 
-        // Register for the event that the listener is readble.
+        // Register for the event that the listener is readable.
         poll.register(
             &mio_tcp_listener,
             LISTENER_MIO_TOKEN,
@@ -136,7 +140,7 @@ impl KeServerListener {
         let (tcp_stream, addr) = match self.tcp_listener.accept() {
             Ok(value) => value,
             Err(error) => {
-                // If it's WouldBlock, just treat it like a success becaue there isn't an actual
+                // If it's WouldBlock, just treat it like a success because there isn't an actual
                 // error. It's just in a non-blocking mode.
                 if error.kind() == std::io::ErrorKind::WouldBlock {
                     return Ok(());

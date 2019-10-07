@@ -183,7 +183,8 @@ impl KeServerListener {
 
         // Create a new connection instance.
         let connection = KeServerConn::new(tcp_stream, token, &self);
-        connection.register(&mut self.poll);
+        // TODO: Fix the unwrap later.
+        connection.register(&mut self.poll).unwrap();
 
         self.connections.insert(token, connection);
 
@@ -217,8 +218,9 @@ impl KeServerListener {
                 // The connection associated with the token may not exist because, when we close
                 // the connection, it's not possible to find an entry in the heap. In which case,
                 // we can just pop the deadline heap.
-                if let Some(connection) = self.connections.remove(&token) {
-                    connection.die();
+                if let Some(mut connection) = self.connections.remove(&token) {
+                    error!(self.logger, "forcible shutdown after timeout");
+                    connection.shutdown();
                 }
                 self.deadlines.pop();
 

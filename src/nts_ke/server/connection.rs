@@ -21,9 +21,12 @@ use crate::nts_ke::protocol::gen_key;
 use crate::nts_ke::protocol::serialize_record;
 use crate::nts_ke::protocol::{NtsKeRecord, NtsKeType};
 
+use super::listener::KeServerListener;
+use super::server::KeServerState;
+
 // response uses the configuration and the keys and computes the response
 // sent to the client.
-fn response(keys: NTSKeys, master_key: &Arc<RwLock<KeyRotator>>, port: &u16) -> Vec<u8> {
+fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: &u16) -> Vec<u8> {
     let mut response: Vec<u8> = Vec::new();
     let mut next_proto = NtsKeRecord {
         critical: true,
@@ -53,7 +56,7 @@ fn response(keys: NTSKeys, master_key: &Arc<RwLock<KeyRotator>>, port: &u16) -> 
 
     response.append(&mut serialize_record(&mut next_proto));
     response.append(&mut serialize_record(&mut aead_rec));
-    let rotor = master_key.read().unwrap();
+    let rotor = rotator.read().unwrap();
     let (key_id, actual_key) = rotor.latest_key_value();
     for _i in 1..8 {
         let cookie = make_cookie(keys, actual_key.as_ref(), key_id);
@@ -69,37 +72,51 @@ fn response(keys: NTSKeys, master_key: &Arc<RwLock<KeyRotator>>, port: &u16) -> 
     response
 }
 
-pub struct Connection {
-    socket: TcpStream,
+/// NTS-KE server TCP connection.
+pub struct KeServerConn {
+    /// Reference back to the corresponding `KeServer` state.
+    server_state: Arc<KeServerState>,
+
+    /// Kernel TCP stream.
+    tcp_stream: TcpStream,
+
+    /// The mio token for this connection.
     token: mio::Token,
     closing: bool,
     closed: bool,
     sent_response: bool,
+
+    /// TLS session for this connection.
     tls_session: rustls::ServerSession,
-    master_key: Arc<RwLock<KeyRotator>>,
-    next_port: u16,
+
+    /// Logger.
     logger: slog::Logger,
 }
 
-impl Connection {
+impl KeServerConn {
     pub fn new(
-        socket: TcpStream,
+        tcp_stream: TcpStream,
         token: mio::Token,
-        tls_session: rustls::ServerSession,
-        master_key: Arc<RwLock<KeyRotator>>,
-        port: u16,
-        logger: slog::Logger,
-    ) -> Connection {
-        Connection {
-            socket,
+        listener: &KeServerListener,
+    ) -> KeServerConn {
+        let server_state = listener.state();
+
+        // Create a TLS session from a server-wide configuration.
+        let tls_session = rustls::ServerSession::new(&server_state.tls_server_config);
+        // Create a child logger for the connection.
+        let logger = listener.logger().new(slog::o!("client" => listener.addr().to_string()));
+
+        KeServerConn {
+            // Create an `Arc` reference.
+            server_state: server_state.clone(),
+            tcp_stream,
+            tls_session,
             token,
+            logger,
+
             closing: false,
             closed: false,
             sent_response: false,
-            tls_session,
-            master_key: master_key.clone(),
-            next_port: port,
-            logger: logger,
         }
     }
 
@@ -114,7 +131,7 @@ impl Connection {
         }
 
         if self.closing {
-            let _ = self.socket.shutdown(Shutdown::Both);
+            let _ = self.tcp_stream.shutdown(Shutdown::Both);
             self.closed = true;
         } else {
             self.reregister(poll);
@@ -123,7 +140,7 @@ impl Connection {
 
     pub fn do_tls_read(&mut self) {
         // Read some TLS data.
-        let rc = self.tls_session.read_tls(&mut self.socket);
+        let rc = self.tls_session.read_tls(&mut self.tcp_stream);
         if rc.is_err() {
             let err = rc.unwrap_err();
 
@@ -173,13 +190,15 @@ impl Connection {
         if !self.sent_response {
             self.sent_response = true;
             self.tls_session
-                .write_all(&response(keys, &self.master_key, &self.next_port))
+                .write_all(&response(keys,
+                                     &self.server_state.rotator,
+                                     &self.server_state.config.next_port))
                 .unwrap();
         }
     }
 
     pub fn tls_write(&mut self) -> std::io::Result<usize> {
-        self.tls_session.write_tls(&mut self.socket)
+        self.tls_session.write_tls(&mut self.tcp_stream)
     }
 
     pub fn do_tls_write_and_handle_error(&mut self) {
@@ -193,7 +212,7 @@ impl Connection {
 
     pub fn register(&self, poll: &mut mio::Poll) {
         poll.register(
-            &self.socket,
+            &self.tcp_stream,
             self.token,
             self.event_set(),
             mio::PollOpt::level(),
@@ -203,7 +222,7 @@ impl Connection {
 
     pub fn reregister(&self, poll: &mut mio::Poll) {
         poll.reregister(
-            &self.socket,
+            &self.tcp_stream,
             self.token,
             self.event_set(),
             mio::PollOpt::level(),
@@ -230,8 +249,8 @@ impl Connection {
 
     pub fn die(&self) {
         error!(self.logger, "forcible shutdown after timeout");
-        self.socket.shutdown(Shutdown::Both)
-            .expect("cannot shutdown socket");
+        self.tcp_stream.shutdown(Shutdown::Both)
+            .expect("cannot shutdown TcpStream");
         self.closed;
     }
 }

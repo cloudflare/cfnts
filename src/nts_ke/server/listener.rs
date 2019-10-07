@@ -17,7 +17,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::cfsock;
 
-use super::connection::Connection;
+use super::connection::KeServerConn;
 use super::server::KeServer;
 use super::server::KeServerState;
 
@@ -39,7 +39,7 @@ pub struct KeServerListener {
     tcp_listener: TcpListener,
 
     /// List of connections accepted by this listener.
-    connections: HashMap<mio::Token, Connection>,
+    connections: HashMap<mio::Token, KeServerConn>,
 
     /// Deadline indices for connections.
     // We use `Reverse` because we want a min heap.
@@ -83,6 +83,8 @@ impl KeServerListener {
         )?;
 
         Ok(KeServerListener {
+            // Create an `Arc` reference.
+            state: state.clone(),
             tcp_listener: mio_tcp_listener,
             connections: HashMap::new(),
             deadlines: BinaryHeap::new(),
@@ -91,8 +93,6 @@ impl KeServerListener {
             // In the future, we may want to use the child logger instead the logger itself.
             logger: state.config.logger().clone(),
             poll,
-            // Create an `Arc` reference.
-            state: state.clone(),
         })
     }
 
@@ -181,24 +181,12 @@ impl KeServerListener {
             self.deadlines.push(Reverse((timeout_systime, token)));
         }
 
-        // TODO: I will refactor the following later.
+        // Create a new connection instance.
+        let connection = KeServerConn::new(tcp_stream, token, &self);
+        connection.register(&mut self.poll);
 
-        let tls_session = rustls::ServerSession::new(&self.state.tls_server_config);
-        let rotator = self.state.rotator.clone();
+        self.connections.insert(token, connection);
 
-        let next_logger = self.logger.new(slog::o!("client" => addr));
-        self.connections.insert(
-            token,
-            Connection::new(
-                tcp_stream,
-                token,
-                tls_session,
-                rotator,
-                self.state.config.next_port,
-                next_logger,
-            ),
-        );
-        self.connections[&token].register(&mut self.poll);
         Ok(())
     }
 
@@ -242,5 +230,20 @@ impl KeServerListener {
                 break;
             }
         }
+    }
+
+    /// Return the state of the corresponding server.
+    pub(super) fn state(&self) -> &Arc<KeServerState> {
+        &self.state
+    }
+
+    /// Return the logger of this listener.
+    pub(super) fn logger(&self) -> &slog::Logger {
+        &self.logger
+    }
+
+    /// Return the address-port of this listener.
+    pub(super) fn addr(&self) -> &SocketAddr {
+        &self.addr
     }
 }

@@ -29,7 +29,7 @@ pub enum NtsKeType {
 }
 
 #[derive(Clone, Debug)]
-pub struct NtsKeRecord {
+pub struct KeRecord {
     pub critical: bool,
     pub record_type: NtsKeType,
     pub contents: Vec<u8>,
@@ -65,7 +65,7 @@ impl std::fmt::Display for DeserializeError {
 
 /// Serialize record serializes an NTS KE record to wire format.
 /// https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-18#section-4
-pub fn serialize_record(rec: &mut NtsKeRecord) -> Vec<u8> {
+pub fn serialize_record(rec: &mut KeRecord) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::new();
     let our_type: u16;
     if rec.critical {
@@ -112,10 +112,10 @@ fn record_type(n: u16) -> Option<NtsKeType> {
     }
 }
 
-/// deserialize_record deserializes an NtsKeRecord
+/// deserialize_record deserializes an KeRecord
 /// https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-18#section-4
-pub fn deserialize_record(buff: &[u8]) -> Result<(Option<NtsKeRecord>, usize), DeserializeError> {
-    let mut out = NtsKeRecord {
+pub fn deserialize_record(buff: &[u8]) -> Result<(Option<KeRecord>, usize), DeserializeError> {
+    let mut out = KeRecord {
         contents: vec![],
         critical: false,
         record_type: EndOfMessage,
@@ -157,7 +157,7 @@ pub fn deserialize_record(buff: &[u8]) -> Result<(Option<NtsKeRecord>, usize), D
 
 /// This extracts the aeads from the AEADAlgorithmNegotation record. The record
 /// may contain multiple algorithms.
-pub fn extract_aead(rec: NtsKeRecord) -> Result<Vec<u16>, DeserializeError> {
+pub fn extract_aead(rec: KeRecord) -> Result<Vec<u16>, DeserializeError> {
     match rec.record_type {
         AEADAlgorithmNegotiation => parse_u16s(rec.contents),
         _ => Err(WrongRecordType),
@@ -165,7 +165,7 @@ pub fn extract_aead(rec: NtsKeRecord) -> Result<Vec<u16>, DeserializeError> {
 }
 
 /// This extracts the port from the port negotiation
-pub fn extract_port(rec: NtsKeRecord) -> Result<u16, DeserializeError> {
+pub fn extract_port(rec: KeRecord) -> Result<u16, DeserializeError> {
     match rec.record_type {
         PortNegotiation => parse_u16(rec.contents),
         _ => Err(WrongRecordType),
@@ -173,7 +173,7 @@ pub fn extract_port(rec: NtsKeRecord) -> Result<u16, DeserializeError> {
 }
 
 /// This extracts the next protocols. Currently only one exists NTP v4.
-pub fn extract_protos(rec: NtsKeRecord) -> Result<Vec<u16>, DeserializeError> {
+pub fn extract_protos(rec: KeRecord) -> Result<Vec<u16>, DeserializeError> {
     match rec.record_type {
         NextProtocolNegotiation => parse_u16s(rec.contents),
         _ => Err(WrongRecordType),

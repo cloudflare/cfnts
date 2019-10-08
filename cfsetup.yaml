@@ -27,3 +27,7 @@ all: &all
     up-args: ["--build", "--force-recreate", "--abort-on-container-exit"]
 jessie: *all
 stretch: *all
+default-flavor:
+    stretch
+default-stack:
+    stretch

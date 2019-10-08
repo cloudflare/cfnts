@@ -17,18 +17,20 @@ use std::time::{Duration, SystemTime};
 
 use crate::cfsock;
 
-use super::connection::Connection;
+use super::connection::KeServerConn;
 use super::server::KeServer;
 use super::server::KeServerState;
 
 const LISTENER_MIO_TOKEN_ID: usize = 0;
 const CONNECTION_MIO_TOKEN_ID_MIN: usize = LISTENER_MIO_TOKEN_ID + 1;
-const CONNECTION_MIO_TOKEN_ID_MAX: usize = usize::max_value();
+// `usize::max_value()` is reserved for mio internal use, so we need to minus one here.
+const CONNECTION_MIO_TOKEN_ID_MAX: usize = usize::max_value() - 1;
 
 /// The token used to associate the mio event with the lister event.
 const LISTENER_MIO_TOKEN: mio::Token = mio::Token(LISTENER_MIO_TOKEN_ID);
 
-/// NTS-KE server internal state after the server starts.
+/// NTS-KE server internal listener for a specific listened address.
+/// One listener will correspond to one kernel listening socket.
 pub struct KeServerListener {
     /// Reference back to the corresponding `KeServer` state.
     state: Arc<KeServerState>,
@@ -37,7 +39,7 @@ pub struct KeServerListener {
     tcp_listener: TcpListener,
 
     /// List of connections accepted by this listener.
-    connections: HashMap<mio::Token, Connection>,
+    connections: HashMap<mio::Token, KeServerConn>,
 
     /// Deadline indices for connections.
     // We use `Reverse` because we want a min heap.
@@ -46,8 +48,10 @@ pub struct KeServerListener {
     /// The next mio token id for a new connection.
     next_conn_token_id: usize,
 
+    /// Address and port that this listener will listen to.
     addr: SocketAddr,
 
+    /// Polling object from mio.
     poll: mio::Poll,
 
     /// Logger.
@@ -70,7 +74,7 @@ impl KeServerListener {
         // Transform a std tcp listener to a mio tcp listener.
         let mio_tcp_listener = TcpListener::from_std(std_tcp_listener)?;
 
-        // Register for the event that the listener is readble.
+        // Register for the event that the listener is readable.
         poll.register(
             &mio_tcp_listener,
             LISTENER_MIO_TOKEN,
@@ -79,6 +83,8 @@ impl KeServerListener {
         )?;
 
         Ok(KeServerListener {
+            // Create an `Arc` reference.
+            state: state.clone(),
             tcp_listener: mio_tcp_listener,
             connections: HashMap::new(),
             deadlines: BinaryHeap::new(),
@@ -87,8 +93,6 @@ impl KeServerListener {
             // In the future, we may want to use the child logger instead the logger itself.
             logger: state.config.logger().clone(),
             poll,
-            // Create an `Arc` reference.
-            state: state.clone(),
         })
     }
 
@@ -136,7 +140,7 @@ impl KeServerListener {
         let (tcp_stream, addr) = match self.tcp_listener.accept() {
             Ok(value) => value,
             Err(error) => {
-                // If it's WouldBlock, just treat it like a success becaue there isn't an actual
+                // If it's WouldBlock, just treat it like a success because there isn't an actual
                 // error. It's just in a non-blocking mode.
                 if error.kind() == std::io::ErrorKind::WouldBlock {
                     return Ok(());
@@ -177,24 +181,13 @@ impl KeServerListener {
             self.deadlines.push(Reverse((timeout_systime, token)));
         }
 
-        // TODO: I will refactor the following later.
+        // Create a new connection instance.
+        let connection = KeServerConn::new(tcp_stream, token, &self);
+        // TODO: Fix the unwrap later.
+        connection.register(&mut self.poll).unwrap();
 
-        let tls_session = rustls::ServerSession::new(&self.state.tls_server_config);
-        let rotator = self.state.rotator.clone();
+        self.connections.insert(token, connection);
 
-        let next_logger = self.logger.new(slog::o!("client" => addr));
-        self.connections.insert(
-            token,
-            Connection::new(
-                tcp_stream,
-                token,
-                tls_session,
-                rotator,
-                self.state.config.next_port,
-                next_logger,
-            ),
-        );
-        self.connections[&token].register(&mut self.poll);
         Ok(())
     }
 
@@ -225,8 +218,9 @@ impl KeServerListener {
                 // The connection associated with the token may not exist because, when we close
                 // the connection, it's not possible to find an entry in the heap. In which case,
                 // we can just pop the deadline heap.
-                if let Some(connection) = self.connections.remove(&token) {
-                    connection.die();
+                if let Some(mut connection) = self.connections.remove(&token) {
+                    error!(self.logger, "forcible shutdown after timeout");
+                    connection.shutdown();
                 }
                 self.deadlines.pop();
 
@@ -238,5 +232,20 @@ impl KeServerListener {
                 break;
             }
         }
+    }
+
+    /// Return the state of the corresponding server.
+    pub(super) fn state(&self) -> &Arc<KeServerState> {
+        &self.state
+    }
+
+    /// Return the logger of this listener.
+    pub(super) fn logger(&self) -> &slog::Logger {
+        &self.logger
+    }
+
+    /// Return the address-port of this listener.
+    pub(super) fn addr(&self) -> &SocketAddr {
+        &self.addr
     }
 }

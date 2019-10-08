@@ -72,8 +72,8 @@ fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: &u16) -> Vec
     response
 }
 
-#[derive(Eq, PartialEq)]
-enum KeServerConnState {
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum KeServerConnState {
     /// The connection is just connected. The TLS handshake is not done yet.
     Connected,
     /// Doing the TLS handshake,
@@ -138,10 +138,10 @@ impl KeServerConn {
         }
 
         if event.readiness().is_writable() {
-            self.do_tls_write_and_handle_error();
+            self.write_ready();
         }
 
-        if !self.is_closed() {
+        if self.state() != KeServerConnState::Closed {
             // TODO: Fix unwrap later.
             self.reregister(poll).unwrap();
         }
@@ -167,7 +167,7 @@ impl KeServerConn {
                 }
 
                 // Close the connection on error.
-                error!(self.logger, "read error {}", error);
+                error!(self.logger, "read error: {}", error);
                 self.shutdown();
                 return;
             }
@@ -221,14 +221,9 @@ impl KeServerConn {
         }
     }
 
-    pub fn tls_write(&mut self) -> std::io::Result<usize> {
-        self.tls_session.write_tls(&mut self.tcp_stream)
-    }
-
-    pub fn do_tls_write_and_handle_error(&mut self) {
-        let rc = self.tls_write();
-        if rc.is_err() {
-            error!(self.logger, "write failed {:?}", rc);
+    fn write_ready(&mut self) {
+        if let Err(error) = self.tls_session.write_tls(&mut self.tcp_stream) {
+            error!(self.logger, "write failed: {}", error);
             self.shutdown();
             return;
         }
@@ -267,8 +262,8 @@ impl KeServerConn {
         }
     }
 
-    pub fn is_closed(&self) -> bool {
-        self.state == KeServerConnState::Closed
+    pub fn state(&self) -> KeServerConnState {
+        self.state
     }
 
     pub fn shutdown(&mut self) {

@@ -18,6 +18,7 @@ use std::time::{Duration, SystemTime};
 use crate::cfsock;
 
 use super::connection::KeServerConn;
+use super::connection::KeServerConnState;
 use super::server::KeServer;
 use super::server::KeServerState;
 
@@ -126,7 +127,7 @@ impl KeServerListener {
                 if let Some(connection) = self.connections.get_mut(&token) {
                     connection.ready(&mut self.poll, &event);
 
-                    if connection.is_closed() {
+                    if connection.state() == KeServerConnState::Closed {
                         self.connections.remove(&token);
                     }
                 }

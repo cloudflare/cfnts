@@ -10,8 +10,8 @@ use rustls;
 use webpki;
 use webpki_roots;
 
-use super::protocol;
-use super::protocol::{DeserializeError::TooShort, *};
+use super::record;
+use super::record::{DeserializeError::TooShort, *};
 
 use self::ClientError::*;
 use crate::sub_command::client::ClientConfig;
@@ -74,7 +74,7 @@ impl std::fmt::Display for ClientError {
 
 /// Read https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-19#section-4
 fn process_record(
-    rec: protocol::NtsKeRecord,
+    rec: record::NtsKeRecord,
     state: &mut ClientState,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if state.finished {
@@ -175,12 +175,12 @@ pub fn run_nts_ke_client(
         contents: vec![],
     };
 
-    tls_stream.write(&protocol::serialize_record(&mut next_proto))?;
-    tls_stream.write(&protocol::serialize_record(&mut aead_rec))?;
-    tls_stream.write(&protocol::serialize_record(&mut end_rec))?;
+    tls_stream.write(&record::serialize_record(&mut next_proto))?;
+    tls_stream.write(&record::serialize_record(&mut aead_rec))?;
+    tls_stream.write(&record::serialize_record(&mut end_rec))?;
     tls_stream.flush()?;
     debug!(logger, "Request transmitted");
-    let keys = protocol::gen_key(tls_stream.sess).unwrap();
+    let keys = record::gen_key(tls_stream.sess).unwrap();
 
     let mut state = ClientState {
         finished: false,
@@ -210,7 +210,7 @@ pub fn run_nts_ke_client(
             // It's structured as a loop because reading from an empty buffer
             // and reading from an insufficiently long buffer both work the same
             // way. We have no promises enough was read.
-            let rec = protocol::deserialize_record(&buf[curr..]);
+            let rec = record::deserialize_record(&buf[curr..]);
             match rec {
                 Ok((Some(rec), len)) => {
                     debug!(logger, "Record: {:?}", rec);

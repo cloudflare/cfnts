@@ -234,7 +234,7 @@ impl KeServerConn {
         poll.register(
             &self.tcp_stream,
             self.token,
-            self.event_set(),
+            self.interest(),
             mio::PollOpt::level(),
         )
     }
@@ -244,22 +244,21 @@ impl KeServerConn {
         poll.reregister(
             &self.tcp_stream,
             self.token,
-            self.event_set(),
+            self.interest(),
             mio::PollOpt::level(),
         )
     }
 
-    pub fn event_set(&self) -> mio::Ready {
-        let rd = self.tls_session.wants_read();
-        let wr = self.tls_session.wants_write();
+    fn interest(&self) -> mio::Ready {
+        let mut ready = mio::Ready::empty();
 
-        if rd && wr {
-            mio::Ready::readable() | mio::Ready::writable()
-        } else if wr {
-            mio::Ready::writable()
-        } else {
-            mio::Ready::readable()
+        if self.tls_session.wants_read() {
+            ready |= mio::Ready::readable();
         }
+        if self.tls_session.wants_write() {
+            ready |= mio::Ready::writable();
+        }
+        ready
     }
 
     pub fn state(&self) -> KeServerConnState {

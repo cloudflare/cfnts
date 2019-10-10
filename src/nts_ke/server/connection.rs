@@ -19,7 +19,7 @@ use crate::cookie::{make_cookie, NTSKeys};
 use crate::key_rotator::KeyRotator;
 use crate::nts_ke::record::gen_key;
 use crate::nts_ke::record::serialize_record;
-use crate::nts_ke::record::{KeRecord, NtsKeType};
+use crate::nts_ke::record::{ExKeRecord, NtsKeType};
 
 use super::listener::KeServerListener;
 use super::server::KeServerState;
@@ -28,19 +28,19 @@ use super::server::KeServerState;
 // sent to the client.
 fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: &u16) -> Vec<u8> {
     let mut response: Vec<u8> = Vec::new();
-    let mut next_proto = KeRecord {
+    let mut next_proto = ExKeRecord {
         critical: true,
         record_type: NtsKeType::NextProtocolNegotiation,
         contents: vec![0, 0],
     };
 
-    let mut aead_rec = KeRecord {
+    let mut aead_rec = ExKeRecord {
         critical: false,
         record_type: NtsKeType::AEADAlgorithmNegotiation,
         contents: vec![0, 15],
     };
 
-    let mut port_rec = KeRecord {
+    let mut port_rec = ExKeRecord {
         critical: false,
         record_type: NtsKeType::PortNegotiation,
         contents: vec![],
@@ -48,7 +48,7 @@ fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: &u16) -> Vec
 
     port_rec.contents.write_u16::<BigEndian>(*port).unwrap();
 
-    let mut end_rec = KeRecord {
+    let mut end_rec = ExKeRecord {
         critical: true,
         record_type: NtsKeType::EndOfMessage,
         contents: vec![],
@@ -60,7 +60,7 @@ fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: &u16) -> Vec
     let (key_id, actual_key) = rotor.latest_key_value();
     for _i in 1..8 {
         let cookie = make_cookie(keys, actual_key.as_ref(), key_id);
-        let mut cookie_rec = KeRecord {
+        let mut cookie_rec = ExKeRecord {
             critical: false,
             record_type: NtsKeType::NewCookie,
             contents: cookie,

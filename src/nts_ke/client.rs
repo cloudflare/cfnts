@@ -74,7 +74,7 @@ impl std::fmt::Display for ClientError {
 
 /// Read https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-19#section-4
 fn process_record(
-    rec: record::KeRecord,
+    rec: record::ExKeRecord,
     state: &mut ClientState,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if state.finished {
@@ -157,19 +157,19 @@ pub fn run_nts_ke_client(
 
     let mut tls_stream = rustls::Stream::new(&mut client, &mut stream);
 
-    let mut next_proto = KeRecord {
+    let mut next_proto = ExKeRecord {
         critical: true,
         record_type: NtsKeType::NextProtocolNegotiation,
         contents: vec![0, 0],
     };
 
-    let mut aead_rec = KeRecord {
+    let mut aead_rec = ExKeRecord {
         critical: false,
         record_type: NtsKeType::AEADAlgorithmNegotiation,
         contents: vec![0, 15],
     };
 
-    let mut end_rec = KeRecord {
+    let mut end_rec = ExKeRecord {
         critical: true,
         record_type: NtsKeType::EndOfMessage,
         contents: vec![],

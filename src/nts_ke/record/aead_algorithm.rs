@@ -20,9 +20,9 @@ impl KnownAlgorithm {
     }
 }
 
-pub struct AeadAlgorithm(Vec<KnownAlgorithm>);
+pub struct AeadAlgorithmRecord(Vec<KnownAlgorithm>);
 
-impl KeRecordTrait for AeadAlgorithm {
+impl KeRecordTrait for AeadAlgorithmRecord {
     fn critical(&self) -> bool {
         // According to the spec, this critical bit is optional, but it's good to assign it as
         // critical.

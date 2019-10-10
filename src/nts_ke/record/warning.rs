@@ -22,9 +22,9 @@ impl WarningKind {
     }
 }
 
-pub struct Warning(WarningKind);
+pub struct WarningRecord(WarningKind);
 
-impl KeRecordTrait for Warning {
+impl KeRecordTrait for WarningRecord {
     fn critical(&self) -> bool {
         true
     }

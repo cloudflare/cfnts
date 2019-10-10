@@ -20,9 +20,9 @@ impl ErrorKind {
     }
 }
 
-pub struct Error(ErrorKind);
+pub struct ErrorRecord(ErrorKind);
 
-impl KeRecordTrait for Error {
+impl KeRecordTrait for ErrorRecord {
     fn critical(&self) -> bool {
         true
     }

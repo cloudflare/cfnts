@@ -19,12 +19,12 @@ enum Address {
     Ipv6Addr(Ipv6Addr),
 }
 
-pub struct Server {
+pub struct ServerRecord {
     sender: Party,
     address: Address,
 }
 
-impl KeRecordTrait for Server {
+impl KeRecordTrait for ServerRecord {
     fn critical(&self) -> bool {
         match self.sender {
             Party::Client => false,

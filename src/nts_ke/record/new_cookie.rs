@@ -8,9 +8,9 @@ use std::convert::TryFrom;
 
 use super::KeRecordTrait;
 
-pub struct NewCookie(Vec<u8>);
+pub struct NewCookieRecord(Vec<u8>);
 
-impl KeRecordTrait for NewCookie {
+impl KeRecordTrait for NewCookieRecord {
     fn critical(&self) -> bool {
         false
     }

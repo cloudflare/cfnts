@@ -9,12 +9,12 @@
 use super::KeRecordTrait;
 use super::Party;
 
-pub struct Port {
+pub struct PortRecord {
     sender: Party,
     port: u16,
 }
 
-impl KeRecordTrait for Port {
+impl KeRecordTrait for PortRecord {
     fn critical(&self) -> bool {
         match self.sender {
             Party::Client => false,

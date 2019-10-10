@@ -48,14 +48,14 @@ pub struct ExKeRecord {
 }
 
 pub enum KeRecord {
-    EndOfMessage(end_of_message::EndOfMessage),
-    NextProtocol(next_protocol::NextProtocol),
-    Error(error::Error),
-    Warning(warning::Warning),
-    AeadAlgorithm(aead_algorithm::AeadAlgorithm),
-    NewCookie(new_cookie::NewCookie),
-    Server(server::Server),
-    Port(port::Port),
+     EndOfMessage(end_of_message::EndOfMessageRecord),
+     NextProtocol(next_protocol::NextProtocolRecord),
+            Error(error::ErrorRecord),
+          Warning(warning::WarningRecord),
+    AeadAlgorithm(aead_algorithm::AeadAlgorithmRecord),
+        NewCookie(new_cookie::NewCookieRecord),
+           Server(server::ServerRecord),
+             Port(port::PortRecord),
 }
 
 pub enum Party {

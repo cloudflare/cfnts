@@ -6,9 +6,9 @@
 
 use super::KeRecordTrait;
 
-pub struct EndOfMessage;
+pub struct EndOfMessageRecord;
 
-impl KeRecordTrait for EndOfMessage {
+impl KeRecordTrait for EndOfMessageRecord {
     fn critical(&self) -> bool {
         true
     }

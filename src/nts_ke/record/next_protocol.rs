@@ -20,9 +20,9 @@ impl KnownProtocol {
     }
 }
 
-pub struct NextProtocol(Vec<KnownProtocol>);
+pub struct NextProtocolRecord(Vec<KnownProtocol>);
 
-impl KeRecordTrait for NextProtocol {
+impl KeRecordTrait for NextProtocolRecord {
     fn critical(&self) -> bool {
         true
     }

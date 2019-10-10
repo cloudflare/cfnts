@@ -1,3 +1,3 @@
 pub mod client;
-pub mod record;
+pub mod records;
 pub mod server;

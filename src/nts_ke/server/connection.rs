@@ -17,9 +17,9 @@ use std::io::{Read, Write};
 
 use crate::cookie::{make_cookie, NTSKeys};
 use crate::key_rotator::KeyRotator;
-use crate::nts_ke::record::gen_key;
-use crate::nts_ke::record::serialize_record;
-use crate::nts_ke::record::{ExKeRecord, NtsKeType};
+use crate::nts_ke::records::gen_key;
+use crate::nts_ke::records::serialize_record;
+use crate::nts_ke::records::{ExKeRecord, NtsKeType};
 
 use super::listener::KeServerListener;
 use super::server::KeServerState;

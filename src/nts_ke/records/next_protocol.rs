@@ -8,19 +8,25 @@ use std::convert::TryFrom;
 
 use super::KeRecordTrait;
 
-enum KnownProtocol {
+pub enum KnownNextProtocol {
     Ntpv4,
 }
 
-impl KnownProtocol {
+impl KnownNextProtocol {
     fn as_protocol_id(&self) -> u16 {
         match self {
-            KnownProtocol::Ntpv4 => 0,
+            KnownNextProtocol::Ntpv4 => 0,
         }
     }
 }
 
-pub struct NextProtocolRecord(Vec<KnownProtocol>);
+pub struct NextProtocolRecord(Vec<KnownNextProtocol>);
+
+impl From<Vec<KnownNextProtocol>> for NextProtocolRecord {
+    fn from(protocols: Vec<KnownNextProtocol>) -> NextProtocolRecord {
+        NextProtocolRecord(protocols)
+    }
+}
 
 impl KeRecordTrait for NextProtocolRecord {
     fn critical(&self) -> bool {

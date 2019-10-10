@@ -14,6 +14,15 @@ pub struct PortRecord {
     port: u16,
 }
 
+impl PortRecord {
+    pub fn new(sender: Party, port: u16) -> PortRecord {
+        PortRecord {
+            sender,
+            port,
+        }
+    }
+}
+
 impl KeRecordTrait for PortRecord {
     fn critical(&self) -> bool {
         match self.sender {

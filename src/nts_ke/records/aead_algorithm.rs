@@ -8,19 +8,25 @@ use std::convert::TryFrom;
 
 use super::KeRecordTrait;
 
-enum KnownAlgorithm {
+pub enum KnownAeadAlgorithm {
     AeadAesSivCmac256,
 }
 
-impl KnownAlgorithm {
+impl KnownAeadAlgorithm {
     fn as_algorithm_id(&self) -> u16 {
         match self {
-            KnownAlgorithm::AeadAesSivCmac256 => 15,
+            KnownAeadAlgorithm::AeadAesSivCmac256 => 15,
         }
     }
 }
 
-pub struct AeadAlgorithmRecord(Vec<KnownAlgorithm>);
+pub struct AeadAlgorithmRecord(Vec<KnownAeadAlgorithm>);
+
+impl From<Vec<KnownAeadAlgorithm>> for AeadAlgorithmRecord {
+    fn from(algorithms: Vec<KnownAeadAlgorithm>) -> AeadAlgorithmRecord {
+        AeadAlgorithmRecord(algorithms)
+    }
+}
 
 impl KeRecordTrait for AeadAlgorithmRecord {
     fn critical(&self) -> bool {

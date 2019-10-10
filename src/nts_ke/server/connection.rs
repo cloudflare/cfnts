@@ -4,8 +4,6 @@
 
 //! NTS-KE server connection.
 
-use byteorder::{BigEndian, WriteBytesExt};
-
 use mio::tcp::{Shutdown, TcpStream};
 
 use rustls::Session;
@@ -20,42 +18,42 @@ use crate::key_rotator::KeyRotator;
 use crate::nts_ke::records::gen_key;
 use crate::nts_ke::records::serialize_record;
 use crate::nts_ke::records::{ExKeRecord, NtsKeType};
+use crate::nts_ke::records::{
+    AeadAlgorithmRecord,
+    EndOfMessageRecord,
+    NextProtocolRecord,
+    PortRecord,
+
+    KnownAeadAlgorithm,
+    KnownNextProtocol,
+
+    Party,
+    Serialize,
+};
 
 use super::listener::KeServerListener;
 use super::server::KeServerState;
 
 // response uses the configuration and the keys and computes the response
 // sent to the client.
-fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: &u16) -> Vec<u8> {
+fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: u16) -> Vec<u8> {
     let mut response: Vec<u8> = Vec::new();
-    let mut next_proto = ExKeRecord {
-        critical: true,
-        record_type: NtsKeType::NextProtocolNegotiation,
-        contents: vec![0, 0],
-    };
 
-    let mut aead_rec = ExKeRecord {
-        critical: false,
-        record_type: NtsKeType::AEADAlgorithmNegotiation,
-        contents: vec![0, 15],
-    };
+    let next_protocol_record = NextProtocolRecord::from(vec![
+        KnownNextProtocol::Ntpv4,
+    ]);
 
-    let mut port_rec = ExKeRecord {
-        critical: false,
-        record_type: NtsKeType::PortNegotiation,
-        contents: vec![],
-    };
+    let aead_record = AeadAlgorithmRecord::from(vec![
+        KnownAeadAlgorithm::AeadAesSivCmac256,
+    ]);
 
-    port_rec.contents.write_u16::<BigEndian>(*port).unwrap();
+    let port_record = PortRecord::new(Party::Server, port);
 
-    let mut end_rec = ExKeRecord {
-        critical: true,
-        record_type: NtsKeType::EndOfMessage,
-        contents: vec![],
-    };
+    let end_record = EndOfMessageRecord;
 
-    response.append(&mut serialize_record(&mut next_proto));
-    response.append(&mut serialize_record(&mut aead_rec));
+    response.append(&mut next_protocol_record.serialize());
+    response.append(&mut aead_record.serialize());
+
     let rotor = rotator.read().unwrap();
     let (key_id, actual_key) = rotor.latest_key_value();
     for _i in 1..8 {
@@ -67,8 +65,8 @@ fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: &u16) -> Vec
         };
         response.append(&mut serialize_record(&mut cookie_rec));
     }
-    response.append(&mut serialize_record(&mut port_rec));
-    response.append(&mut serialize_record(&mut end_rec));
+    response.append(&mut port_record.serialize());
+    response.append(&mut end_record.serialize());
     response
 }
 
@@ -212,9 +210,8 @@ impl KeServerConn {
             if self.state == KeServerConnState::Opened {
                 // TODO: Fix unwrap later.
                 self.tls_session
-                    .write_all(&response(keys,
-                                         &self.server_state.rotator,
-                                         &self.server_state.config.next_port)).unwrap();
+                    .write_all(&response(keys, &self.server_state.rotator,
+                                         self.server_state.config.next_port)).unwrap();
                 // Mark that the reponse is sent.
                 self.state = KeServerConnState::ResponseSent;
             }

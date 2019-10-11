@@ -16,6 +16,16 @@ use super::records::{DeserializeError::TooShort, *};
 use self::ClientError::*;
 use crate::sub_command::client::ClientConfig;
 use crate::cookie::NTSKeys;
+use crate::nts_ke::records::{
+    AeadAlgorithmRecord,
+    EndOfMessageRecord,
+    NextProtocolRecord,
+
+    KnownAeadAlgorithm,
+    KnownNextProtocol,
+
+    Serialize,
+};
 
 type Cookie = Vec<u8>;
 
@@ -157,27 +167,17 @@ pub fn run_nts_ke_client(
 
     let mut tls_stream = rustls::Stream::new(&mut client, &mut stream);
 
-    let mut next_proto = ExKeRecord {
-        critical: true,
-        record_type: NtsKeType::NextProtocolNegotiation,
-        contents: vec![0, 0],
-    };
+    let next_protocol_record = NextProtocolRecord::from(vec![
+        KnownNextProtocol::Ntpv4,
+    ]);
+    let aead_record = AeadAlgorithmRecord::from(vec![
+        KnownAeadAlgorithm::AeadAesSivCmac256,
+    ]);
+    let end_record = EndOfMessageRecord;
 
-    let mut aead_rec = ExKeRecord {
-        critical: false,
-        record_type: NtsKeType::AEADAlgorithmNegotiation,
-        contents: vec![0, 15],
-    };
-
-    let mut end_rec = ExKeRecord {
-        critical: true,
-        record_type: NtsKeType::EndOfMessage,
-        contents: vec![],
-    };
-
-    tls_stream.write(&records::serialize_record(&mut next_proto))?;
-    tls_stream.write(&records::serialize_record(&mut aead_rec))?;
-    tls_stream.write(&records::serialize_record(&mut end_rec))?;
+    tls_stream.write(&next_protocol_record.serialize())?;
+    tls_stream.write(&aead_record.serialize())?;
+    tls_stream.write(&end_record.serialize())?;
     tls_stream.flush()?;
     debug!(logger, "Request transmitted");
     let keys = records::gen_key(tls_stream.sess).unwrap();

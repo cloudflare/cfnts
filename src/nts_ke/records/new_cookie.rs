@@ -10,6 +10,12 @@ use super::KeRecordTrait;
 
 pub struct NewCookieRecord(Vec<u8>);
 
+impl From<Vec<u8>> for NewCookieRecord {
+    fn from(bytes: Vec<u8>) -> NewCookieRecord {
+        NewCookieRecord(bytes)
+    }
+}
+
 impl KeRecordTrait for NewCookieRecord {
     fn critical(&self) -> bool {
         false

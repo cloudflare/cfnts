@@ -24,8 +24,6 @@ pub use self::new_cookie::*;
 pub use self::server::*;
 pub use self::port::*;
 
-use byteorder::{BigEndian, WriteBytesExt};
-
 use rustls::TLSError;
 
 use crate::cookie::NTSKeys;
@@ -132,23 +130,6 @@ impl<T: KeRecordTrait> Serialize for T {
 
         result
     }
-}
-
-/// Serialize record serializes an NTS KE record to wire format.
-/// https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-18#section-4
-pub fn serialize_record(rec: &mut ExKeRecord) -> Vec<u8> {
-    let mut out: Vec<u8> = Vec::new();
-    let our_type: u16;
-    if rec.critical {
-        our_type = (1 << 15) + rec.record_type as u16; // Set high bit if critical
-    } else {
-        our_type = rec.record_type as u16; //if not its just the type
-    }
-    out.write_u16::<BigEndian>(our_type).unwrap();
-    let our_len = rec.contents.len() as u16;
-    out.write_u16::<BigEndian>(our_len).unwrap();
-    out.append(&mut rec.contents);
-    return out;
 }
 
 /// gen_key computes the client and server keys using exporters.

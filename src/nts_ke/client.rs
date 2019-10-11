@@ -10,8 +10,8 @@ use rustls;
 use webpki;
 use webpki_roots;
 
-use super::protocol;
-use super::protocol::{DeserializeError::TooShort, *};
+use super::records;
+use super::records::{DeserializeError::TooShort, *};
 
 use self::ClientError::*;
 use crate::sub_command::client::ClientConfig;
@@ -74,7 +74,7 @@ impl std::fmt::Display for ClientError {
 
 /// Read https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-19#section-4
 fn process_record(
-    rec: protocol::NtsKeRecord,
+    rec: records::ExKeRecord,
     state: &mut ClientState,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if state.finished {
@@ -157,30 +157,30 @@ pub fn run_nts_ke_client(
 
     let mut tls_stream = rustls::Stream::new(&mut client, &mut stream);
 
-    let mut next_proto = NtsKeRecord {
+    let mut next_proto = ExKeRecord {
         critical: true,
         record_type: NtsKeType::NextProtocolNegotiation,
         contents: vec![0, 0],
     };
 
-    let mut aead_rec = NtsKeRecord {
+    let mut aead_rec = ExKeRecord {
         critical: false,
         record_type: NtsKeType::AEADAlgorithmNegotiation,
         contents: vec![0, 15],
     };
 
-    let mut end_rec = NtsKeRecord {
+    let mut end_rec = ExKeRecord {
         critical: true,
         record_type: NtsKeType::EndOfMessage,
         contents: vec![],
     };
 
-    tls_stream.write(&protocol::serialize_record(&mut next_proto))?;
-    tls_stream.write(&protocol::serialize_record(&mut aead_rec))?;
-    tls_stream.write(&protocol::serialize_record(&mut end_rec))?;
+    tls_stream.write(&records::serialize_record(&mut next_proto))?;
+    tls_stream.write(&records::serialize_record(&mut aead_rec))?;
+    tls_stream.write(&records::serialize_record(&mut end_rec))?;
     tls_stream.flush()?;
     debug!(logger, "Request transmitted");
-    let keys = protocol::gen_key(tls_stream.sess).unwrap();
+    let keys = records::gen_key(tls_stream.sess).unwrap();
 
     let mut state = ClientState {
         finished: false,
@@ -210,7 +210,7 @@ pub fn run_nts_ke_client(
             // It's structured as a loop because reading from an empty buffer
             // and reading from an insufficiently long buffer both work the same
             // way. We have no promises enough was read.
-            let rec = protocol::deserialize_record(&buf[curr..]);
+            let rec = records::deserialize_record(&buf[curr..]);
             match rec {
                 Ok((Some(rec), len)) => {
                     debug!(logger, "Record: {:?}", rec);

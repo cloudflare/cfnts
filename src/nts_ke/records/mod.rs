@@ -1,7 +1,31 @@
-extern crate byteorder;
+// This file is part of cfnts.
+// Copyright (c) 2019, Cloudflare. All rights reserved.
+// See LICENSE for licensing information.
+
+//! NTS-KE record representation.
+
+mod end_of_message;
+mod next_protocol;
+mod error;
+mod warning;
+mod aead_algorithm;
+mod new_cookie;
+mod server;
+mod port;
+
+// We pub use everything in the submodules. You can limit the scope of usage by putting it the
+// submodule itself.
+pub use self::end_of_message::*;
+pub use self::next_protocol::*;
+pub use self::error::*;
+pub use self::warning::*;
+pub use self::aead_algorithm::*;
+pub use self::new_cookie::*;
+pub use self::server::*;
+pub use self::port::*;
+
 use byteorder::{BigEndian, WriteBytesExt};
 
-extern crate rustls;
 use rustls::TLSError;
 
 use crate::cookie::NTSKeys;
@@ -9,7 +33,6 @@ use crate::cookie::NTSKeys;
 use self::DeserializeError::*;
 use self::NtsKeType::*;
 
-use std::error;
 use std::error::Error;
 use std::fmt;
 
@@ -29,10 +52,34 @@ pub enum NtsKeType {
 }
 
 #[derive(Clone, Debug)]
-pub struct NtsKeRecord {
+pub struct ExKeRecord {
     pub critical: bool,
     pub record_type: NtsKeType,
     pub contents: Vec<u8>,
+}
+
+pub enum KeRecord {
+    EndOfMessage(EndOfMessageRecord),
+    NextProtocol(NextProtocolRecord),
+    Error(ErrorRecord),
+    Warning(WarningRecord),
+    AeadAlgorithm(AeadAlgorithmRecord),
+    NewCookie(NewCookieRecord),
+    Server(ServerRecord),
+    Port(PortRecord),
+}
+
+pub enum Party {
+    Client,
+    Server,
+}
+
+pub trait KeRecordTrait {
+    fn critical(&self) -> bool;
+    fn record_type(&self) -> u16;
+    fn len(&self) -> u16;
+    // This function has to consume the object to avoid additional memory consumption.
+    fn into_bytes(self) -> Vec<u8>;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -43,7 +90,7 @@ pub enum DeserializeError {
     WrongRecordType,
 }
 
-impl error::Error for DeserializeError {
+impl std::error::Error for DeserializeError {
     fn description(&self) -> &str {
         match self {
             Malformed => "Malformed record",
@@ -52,7 +99,7 @@ impl error::Error for DeserializeError {
             WrongRecordType => "Incorrect type of record passed",
         }
     }
-    fn cause(&self) -> Option<&error::Error> {
+    fn cause(&self) -> Option<&std::error::Error> {
         None
     }
 }
@@ -63,9 +110,33 @@ impl std::fmt::Display for DeserializeError {
     }
 }
 
+/// Serialize into a blob.
+pub trait Serialize {
+    fn serialize(self) -> Vec<u8>;
+}
+
+/// Every record type must be serializable.
+impl<T: KeRecordTrait> Serialize for T {
+    fn serialize(self) -> Vec<u8> {
+        let mut result = Vec::new();
+
+        // The first 16 bits will comprise a critical bit and the record type.
+        let first_word: u16 = (u16::from(self.critical()) << 15) + self.record_type();
+        result.append(&mut Vec::from(&first_word.to_be_bytes()[..]));
+
+        // The second 16 bits will be the length of the record body.
+        result.append(&mut Vec::from(&self.len().to_be_bytes()[..]));
+
+        // The rest is the content of the record.
+        result.append(&mut self.into_bytes());
+
+        result
+    }
+}
+
 /// Serialize record serializes an NTS KE record to wire format.
 /// https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-18#section-4
-pub fn serialize_record(rec: &mut NtsKeRecord) -> Vec<u8> {
+pub fn serialize_record(rec: &mut ExKeRecord) -> Vec<u8> {
     let mut out: Vec<u8> = Vec::new();
     let our_type: u16;
     if rec.critical {
@@ -112,10 +183,10 @@ fn record_type(n: u16) -> Option<NtsKeType> {
     }
 }
 
-/// deserialize_record deserializes an NtsKeRecord
+/// deserialize_record deserializes an ExKeRecord
 /// https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-18#section-4
-pub fn deserialize_record(buff: &[u8]) -> Result<(Option<NtsKeRecord>, usize), DeserializeError> {
-    let mut out = NtsKeRecord {
+pub fn deserialize_record(buff: &[u8]) -> Result<(Option<ExKeRecord>, usize), DeserializeError> {
+    let mut out = ExKeRecord {
         contents: vec![],
         critical: false,
         record_type: EndOfMessage,
@@ -157,7 +228,7 @@ pub fn deserialize_record(buff: &[u8]) -> Result<(Option<NtsKeRecord>, usize), D
 
 /// This extracts the aeads from the AEADAlgorithmNegotation record. The record
 /// may contain multiple algorithms.
-pub fn extract_aead(rec: NtsKeRecord) -> Result<Vec<u16>, DeserializeError> {
+pub fn extract_aead(rec: ExKeRecord) -> Result<Vec<u16>, DeserializeError> {
     match rec.record_type {
         AEADAlgorithmNegotiation => parse_u16s(rec.contents),
         _ => Err(WrongRecordType),
@@ -165,7 +236,7 @@ pub fn extract_aead(rec: NtsKeRecord) -> Result<Vec<u16>, DeserializeError> {
 }
 
 /// This extracts the port from the port negotiation
-pub fn extract_port(rec: NtsKeRecord) -> Result<u16, DeserializeError> {
+pub fn extract_port(rec: ExKeRecord) -> Result<u16, DeserializeError> {
     match rec.record_type {
         PortNegotiation => parse_u16(rec.contents),
         _ => Err(WrongRecordType),
@@ -173,7 +244,7 @@ pub fn extract_port(rec: NtsKeRecord) -> Result<u16, DeserializeError> {
 }
 
 /// This extracts the next protocols. Currently only one exists NTP v4.
-pub fn extract_protos(rec: NtsKeRecord) -> Result<Vec<u16>, DeserializeError> {
+pub fn extract_protos(rec: ExKeRecord) -> Result<Vec<u16>, DeserializeError> {
     match rec.record_type {
         NextProtocolNegotiation => parse_u16s(rec.contents),
         _ => Err(WrongRecordType),

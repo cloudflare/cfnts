@@ -4,8 +4,6 @@
 
 //! NTS-KE server connection.
 
-use byteorder::{BigEndian, WriteBytesExt};
-
 use mio::tcp::{Shutdown, TcpStream};
 
 use rustls::Session;
@@ -17,63 +15,63 @@ use std::io::{Read, Write};
 
 use crate::cookie::{make_cookie, NTSKeys};
 use crate::key_rotator::KeyRotator;
-use crate::nts_ke::protocol::gen_key;
-use crate::nts_ke::protocol::serialize_record;
-use crate::nts_ke::protocol::{NtsKeRecord, NtsKeType};
+use crate::nts_ke::records::gen_key;
+use crate::nts_ke::records::serialize_record;
+use crate::nts_ke::records::{ExKeRecord, NtsKeType};
+use crate::nts_ke::records::{
+    AeadAlgorithmRecord,
+    EndOfMessageRecord,
+    NextProtocolRecord,
+    PortRecord,
+
+    KnownAeadAlgorithm,
+    KnownNextProtocol,
+
+    Party,
+    Serialize,
+};
 
 use super::listener::KeServerListener;
 use super::server::KeServerState;
 
 // response uses the configuration and the keys and computes the response
 // sent to the client.
-fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: &u16) -> Vec<u8> {
+fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: u16) -> Vec<u8> {
     let mut response: Vec<u8> = Vec::new();
-    let mut next_proto = NtsKeRecord {
-        critical: true,
-        record_type: NtsKeType::NextProtocolNegotiation,
-        contents: vec![0, 0],
-    };
 
-    let mut aead_rec = NtsKeRecord {
-        critical: false,
-        record_type: NtsKeType::AEADAlgorithmNegotiation,
-        contents: vec![0, 15],
-    };
+    let next_protocol_record = NextProtocolRecord::from(vec![
+        KnownNextProtocol::Ntpv4,
+    ]);
 
-    let mut port_rec = NtsKeRecord {
-        critical: false,
-        record_type: NtsKeType::PortNegotiation,
-        contents: vec![],
-    };
+    let aead_record = AeadAlgorithmRecord::from(vec![
+        KnownAeadAlgorithm::AeadAesSivCmac256,
+    ]);
 
-    port_rec.contents.write_u16::<BigEndian>(*port).unwrap();
+    let port_record = PortRecord::new(Party::Server, port);
 
-    let mut end_rec = NtsKeRecord {
-        critical: true,
-        record_type: NtsKeType::EndOfMessage,
-        contents: vec![],
-    };
+    let end_record = EndOfMessageRecord;
 
-    response.append(&mut serialize_record(&mut next_proto));
-    response.append(&mut serialize_record(&mut aead_rec));
+    response.append(&mut next_protocol_record.serialize());
+    response.append(&mut aead_record.serialize());
+
     let rotor = rotator.read().unwrap();
     let (key_id, actual_key) = rotor.latest_key_value();
     for _i in 1..8 {
         let cookie = make_cookie(keys, actual_key.as_ref(), key_id);
-        let mut cookie_rec = NtsKeRecord {
+        let mut cookie_rec = ExKeRecord {
             critical: false,
             record_type: NtsKeType::NewCookie,
             contents: cookie,
         };
         response.append(&mut serialize_record(&mut cookie_rec));
     }
-    response.append(&mut serialize_record(&mut port_rec));
-    response.append(&mut serialize_record(&mut end_rec));
+    response.append(&mut port_record.serialize());
+    response.append(&mut end_record.serialize());
     response
 }
 
-#[derive(Eq, PartialEq)]
-enum KeServerConnState {
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum KeServerConnState {
     /// The connection is just connected. The TLS handshake is not done yet.
     Connected,
     /// Doing the TLS handshake,
@@ -138,10 +136,10 @@ impl KeServerConn {
         }
 
         if event.readiness().is_writable() {
-            self.do_tls_write_and_handle_error();
+            self.write_ready();
         }
 
-        if !self.is_closed() {
+        if self.state() != KeServerConnState::Closed {
             // TODO: Fix unwrap later.
             self.reregister(poll).unwrap();
         }
@@ -167,7 +165,7 @@ impl KeServerConn {
                 }
 
                 // Close the connection on error.
-                error!(self.logger, "read error {}", error);
+                error!(self.logger, "read error: {}", error);
                 self.shutdown();
                 return;
             }
@@ -212,23 +210,17 @@ impl KeServerConn {
             if self.state == KeServerConnState::Opened {
                 // TODO: Fix unwrap later.
                 self.tls_session
-                    .write_all(&response(keys,
-                                         &self.server_state.rotator,
-                                         &self.server_state.config.next_port)).unwrap();
+                    .write_all(&response(keys, &self.server_state.rotator,
+                                         self.server_state.config.next_port)).unwrap();
                 // Mark that the reponse is sent.
                 self.state = KeServerConnState::ResponseSent;
             }
         }
     }
 
-    pub fn tls_write(&mut self) -> std::io::Result<usize> {
-        self.tls_session.write_tls(&mut self.tcp_stream)
-    }
-
-    pub fn do_tls_write_and_handle_error(&mut self) {
-        let rc = self.tls_write();
-        if rc.is_err() {
-            error!(self.logger, "write failed {:?}", rc);
+    fn write_ready(&mut self) {
+        if let Err(error) = self.tls_session.write_tls(&mut self.tcp_stream) {
+            error!(self.logger, "write failed: {}", error);
             self.shutdown();
             return;
         }
@@ -239,7 +231,7 @@ impl KeServerConn {
         poll.register(
             &self.tcp_stream,
             self.token,
-            self.event_set(),
+            self.interest(),
             mio::PollOpt::level(),
         )
     }
@@ -249,26 +241,25 @@ impl KeServerConn {
         poll.reregister(
             &self.tcp_stream,
             self.token,
-            self.event_set(),
+            self.interest(),
             mio::PollOpt::level(),
         )
     }
 
-    pub fn event_set(&self) -> mio::Ready {
-        let rd = self.tls_session.wants_read();
-        let wr = self.tls_session.wants_write();
+    fn interest(&self) -> mio::Ready {
+        let mut ready = mio::Ready::empty();
 
-        if rd && wr {
-            mio::Ready::readable() | mio::Ready::writable()
-        } else if wr {
-            mio::Ready::writable()
-        } else {
-            mio::Ready::readable()
+        if self.tls_session.wants_read() {
+            ready |= mio::Ready::readable();
         }
+        if self.tls_session.wants_write() {
+            ready |= mio::Ready::writable();
+        }
+        ready
     }
 
-    pub fn is_closed(&self) -> bool {
-        self.state == KeServerConnState::Closed
+    pub fn state(&self) -> KeServerConnState {
+        self.state
     }
 
     pub fn shutdown(&mut self) {

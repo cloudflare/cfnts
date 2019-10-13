@@ -13,7 +13,7 @@ impl KeRecordTrait for EndOfMessageRecord {
         true
     }
 
-    fn record_type(&self) -> u16 {
+    fn record_type() -> u16 {
         0
     }
 

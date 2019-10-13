@@ -74,7 +74,7 @@ pub enum Party {
 
 pub trait KeRecordTrait {
     fn critical(&self) -> bool;
-    fn record_type(&self) -> u16;
+    fn record_type() -> u16;
     fn len(&self) -> u16;
     // This function has to consume the object to avoid additional memory consumption.
     fn into_bytes(self) -> Vec<u8>;
@@ -102,33 +102,30 @@ impl std::error::Error for DeserializeError {
     }
 }
 
+// ------------------------------------------------------------------------
+// Serialization
+// ------------------------------------------------------------------------
+
+/// Serialize the record into the network-ready format.
+pub fn serialize<T: KeRecordTrait>(record: T) -> Vec<u8> {
+    let mut result = Vec::new();
+
+    // The first 16 bits will comprise a critical bit and the record type.
+    let first_word: u16 = (u16::from(record.critical()) << 15) + T::record_type();
+    result.append(&mut Vec::from(&first_word.to_be_bytes()[..]));
+
+    // The second 16 bits will be the length of the record body.
+    result.append(&mut Vec::from(&record.len().to_be_bytes()[..]));
+
+    // The rest is the content of the record.
+    result.append(&mut record.into_bytes());
+
+    result
+}
+
 impl std::fmt::Display for DeserializeError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.description())
-    }
-}
-
-/// Serialize into a blob.
-pub trait Serialize {
-    fn serialize(self) -> Vec<u8>;
-}
-
-/// Every record type must be serializable.
-impl<T: KeRecordTrait> Serialize for T {
-    fn serialize(self) -> Vec<u8> {
-        let mut result = Vec::new();
-
-        // The first 16 bits will comprise a critical bit and the record type.
-        let first_word: u16 = (u16::from(self.critical()) << 15) + self.record_type();
-        result.append(&mut Vec::from(&first_word.to_be_bytes()[..]));
-
-        // The second 16 bits will be the length of the record body.
-        result.append(&mut Vec::from(&self.len().to_be_bytes()[..]));
-
-        // The rest is the content of the record.
-        result.append(&mut self.into_bytes());
-
-        result
     }
 }
 

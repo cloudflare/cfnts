@@ -16,6 +16,7 @@ use super::records::{DeserializeError::TooShort, *};
 use self::ClientError::*;
 use crate::sub_command::client::ClientConfig;
 use crate::cookie::NTSKeys;
+use crate::nts_ke::records::serialize;
 use crate::nts_ke::records::{
     AeadAlgorithmRecord,
     EndOfMessageRecord,
@@ -23,8 +24,6 @@ use crate::nts_ke::records::{
 
     KnownAeadAlgorithm,
     KnownNextProtocol,
-
-    Serialize,
 };
 
 type Cookie = Vec<u8>;
@@ -175,9 +174,9 @@ pub fn run_nts_ke_client(
     ]);
     let end_record = EndOfMessageRecord;
 
-    tls_stream.write(&next_protocol_record.serialize())?;
-    tls_stream.write(&aead_record.serialize())?;
-    tls_stream.write(&end_record.serialize())?;
+    tls_stream.write(&serialize(next_protocol_record))?;
+    tls_stream.write(&serialize(aead_record))?;
+    tls_stream.write(&serialize(end_record))?;
     tls_stream.flush()?;
     debug!(logger, "Request transmitted");
     let keys = records::gen_key(tls_stream.sess).unwrap();

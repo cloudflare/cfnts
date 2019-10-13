@@ -32,7 +32,7 @@ impl KeRecordTrait for ServerRecord {
         }
     }
 
-    fn record_type(&self) -> u16 {
+    fn record_type() -> u16 {
         6
     }
 

@@ -21,7 +21,7 @@ impl KeRecordTrait for NewCookieRecord {
         false
     }
 
-    fn record_type(&self) -> u16 {
+    fn record_type() -> u16 {
         5
     }
 

@@ -5,6 +5,7 @@
 //! Error record representation.
 
 use super::KeRecordTrait;
+use super::Party;
 
 enum ErrorKind {
     UnrecognizedCriticalRecord,
@@ -38,5 +39,25 @@ impl KeRecordTrait for ErrorRecord {
     fn into_bytes(self) -> Vec<u8> {
         let error_code = &self.0.as_code().to_be_bytes()[..];
         Vec::from(error_code)
+    }
+
+    fn from_bytes(_: Party, bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() != 2 {
+            return Err(String::from("the body length of Error must be two."))
+        }
+
+        let error_code = u16::from_be_bytes([bytes[0], bytes[1]]);
+
+        let kind = ErrorKind::UnrecognizedCriticalRecord;
+        if kind.as_code() == error_code {
+            return Ok(ErrorRecord(kind));
+        }
+
+        let kind = ErrorKind::BadRequest;
+        if kind.as_code() == error_code {
+            return Ok(ErrorRecord(kind));
+        }
+
+        return Err(String::from("unknown error code"))
     }
 }

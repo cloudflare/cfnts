@@ -21,6 +21,10 @@ impl PortRecord {
             port,
         }
     }
+
+    pub fn port(&self) -> u16 {
+        self.port
+    }
 }
 
 impl KeRecordTrait for PortRecord {
@@ -41,5 +45,18 @@ impl KeRecordTrait for PortRecord {
 
     fn into_bytes(self) -> Vec<u8> {
         Vec::from(&self.port.to_be_bytes()[..])
+    }
+
+    fn from_bytes(sender: Party, bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() != 2 {
+            Err(String::from("the body length of Port must be two."))
+        } else {
+            let port = u16::from_be_bytes([bytes[0], bytes[1]]);
+
+            Ok(PortRecord {
+                sender,
+                port,
+            })
+        }
     }
 }

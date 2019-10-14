@@ -7,13 +7,15 @@
 use std::convert::TryFrom;
 
 use super::KeRecordTrait;
+use super::Party;
 
+#[derive(Clone, Copy)]
 pub enum KnownNextProtocol {
     Ntpv4,
 }
 
 impl KnownNextProtocol {
-    fn as_protocol_id(&self) -> u16 {
+    pub fn as_protocol_id(&self) -> u16 {
         match self {
             KnownNextProtocol::Ntpv4 => 0,
         }
@@ -21,6 +23,12 @@ impl KnownNextProtocol {
 }
 
 pub struct NextProtocolRecord(Vec<KnownNextProtocol>);
+
+impl NextProtocolRecord {
+    pub fn protocols(&self) -> &[KnownNextProtocol] {
+        self.0.as_slice()
+    }
+}
 
 impl From<Vec<KnownNextProtocol>> for NextProtocolRecord {
     fn from(protocols: Vec<KnownNextProtocol>) -> NextProtocolRecord {
@@ -56,5 +64,29 @@ impl KeRecordTrait for NextProtocolRecord {
         }
 
         bytes
+    }
+
+    fn from_bytes(_: Party, bytes: &[u8]) -> Result<Self, String> {
+        // The body length must be even because each protocol code take 2 bytes, so it's not
+        // reasonable for the length to be odd.
+        if bytes.len() % 2 != 0 {
+            return Err(String::from("the body length of Next Protocol Negotiation
+                                     must be even."));
+        }
+
+        let mut protocols = Vec::new();
+
+        for word in bytes.chunks_exact(2) {
+            let protocol_code = u16::from_be_bytes([word[0], word[1]]);
+
+            let protocol = KnownNextProtocol::Ntpv4;
+            if protocol.as_protocol_id() == protocol_code {
+                protocols.push(protocol);
+            } else {
+                return Err(String::from("unknown Next Protocol id"));
+            }
+        }
+
+        Ok(NextProtocolRecord(protocols))
     }
 }

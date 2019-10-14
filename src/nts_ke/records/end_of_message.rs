@@ -5,6 +5,7 @@
 //! End Of Message record representation.
 
 use super::KeRecordTrait;
+use super::Party;
 
 pub struct EndOfMessageRecord;
 
@@ -23,5 +24,13 @@ impl KeRecordTrait for EndOfMessageRecord {
 
     fn into_bytes(self) -> Vec<u8> {
         Vec::new()
+    }
+
+    fn from_bytes(_: Party, bytes: &[u8]) -> Result<Self, String> {
+        if bytes.len() != 0 {
+            Err(String::from("the body length of End Of Message must be zero."))
+        } else {
+            Ok(EndOfMessageRecord)
+        }
     }
 }

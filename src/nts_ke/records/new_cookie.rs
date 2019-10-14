@@ -7,6 +7,7 @@
 use std::convert::TryFrom;
 
 use super::KeRecordTrait;
+use super::Party;
 
 pub struct NewCookieRecord(Vec<u8>);
 
@@ -32,5 +33,11 @@ impl KeRecordTrait for NewCookieRecord {
 
     fn into_bytes(self) -> Vec<u8> {
         self.0
+    }
+
+    fn from_bytes(_: Party, bytes: &[u8]) -> Result<Self, String> {
+        // There is error for New Cookie record, because any byte slice is considered a valid
+        // cookie.
+        Ok(NewCookieRecord::from(Vec::from(bytes)))
     }
 }

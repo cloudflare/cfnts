@@ -67,17 +67,23 @@ pub enum KeRecord {
     Port(PortRecord),
 }
 
+#[derive(Clone, Copy)]
 pub enum Party {
     Client,
     Server,
 }
 
-pub trait KeRecordTrait {
+pub trait KeRecordTrait: Sized {
     fn critical(&self) -> bool;
+
     fn record_type() -> u16;
+
     fn len(&self) -> u16;
+
     // This function has to consume the object to avoid additional memory consumption.
     fn into_bytes(self) -> Vec<u8>;
+
+    fn from_bytes(sender: Party, bytes: &[u8]) -> Result<Self, String>;
 }
 
 #[derive(Clone, Copy, Debug)]

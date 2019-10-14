@@ -7,13 +7,15 @@
 use std::convert::TryFrom;
 
 use super::KeRecordTrait;
+use super::Party;
 
+#[derive(Clone, Copy)]
 pub enum KnownAeadAlgorithm {
     AeadAesSivCmac256,
 }
 
 impl KnownAeadAlgorithm {
-    fn as_algorithm_id(&self) -> u16 {
+    pub fn as_algorithm_id(&self) -> u16 {
         match self {
             KnownAeadAlgorithm::AeadAesSivCmac256 => 15,
         }
@@ -21,6 +23,12 @@ impl KnownAeadAlgorithm {
 }
 
 pub struct AeadAlgorithmRecord(Vec<KnownAeadAlgorithm>);
+
+impl AeadAlgorithmRecord {
+    pub fn algorithms(&self) -> &[KnownAeadAlgorithm] {
+        self.0.as_slice()
+    }
+}
 
 impl From<Vec<KnownAeadAlgorithm>> for AeadAlgorithmRecord {
     fn from(algorithms: Vec<KnownAeadAlgorithm>) -> AeadAlgorithmRecord {
@@ -58,5 +66,29 @@ impl KeRecordTrait for AeadAlgorithmRecord {
         }
 
         bytes
+    }
+
+    fn from_bytes(_: Party, bytes: &[u8]) -> Result<Self, String> {
+        // The body length must be even because each algorithm code take 2 bytes, so it's not
+        // reasonable for the length to be odd.
+        if bytes.len() % 2 != 0 {
+            return Err(String::from("the body length of AEAD Algorithm Negotiation
+                                     must be even."));
+        }
+
+        let mut algorithms = Vec::new();
+
+        for word in bytes.chunks_exact(2) {
+            let algorithm_code = u16::from_be_bytes([word[0], word[1]]);
+
+            let algorithm = KnownAeadAlgorithm::AeadAesSivCmac256;
+            if algorithm.as_algorithm_id() == algorithm_code {
+                algorithms.push(algorithm);
+            } else {
+                return Err(String::from("unknown AEAD algorithm id"));
+            }
+        }
+
+        Ok(AeadAlgorithmRecord(algorithms))
     }
 }

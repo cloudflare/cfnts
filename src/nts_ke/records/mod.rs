@@ -28,33 +28,7 @@ use rustls::TLSError;
 
 use crate::cookie::NTSKeys;
 
-use self::DeserializeError::*;
-use self::NtsKeType::*;
-
-use std::error::Error;
-use std::fmt;
-
-const CRIT_BIT: u16 = 0x8000;
-const HEADER_SIZE: usize = 4;
-
-#[derive(Clone, Copy, Debug)]
-pub enum NtsKeType {
-    EndOfMessage = 0,
-    NextProtocolNegotiation = 1,
-    Error = 2,
-    Warning = 3,
-    AEADAlgorithmNegotiation = 4,
-    NewCookie = 5,
-    ServerNegotiation = 6,
-    PortNegotiation = 7,
-}
-
-#[derive(Clone, Debug)]
-pub struct ExKeRecord {
-    pub critical: bool,
-    pub record_type: NtsKeType,
-    pub contents: Vec<u8>,
-}
+pub const HEADER_SIZE: usize = 4;
 
 pub enum KeRecord {
     EndOfMessage(EndOfMessageRecord),
@@ -86,28 +60,6 @@ pub trait KeRecordTrait: Sized {
     fn from_bytes(sender: Party, bytes: &[u8]) -> Result<Self, String>;
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum DeserializeError {
-    Malformed,
-    TooShort(usize),
-    UnrecognizedCriticalRecord,
-    WrongRecordType,
-}
-
-impl std::error::Error for DeserializeError {
-    fn description(&self) -> &str {
-        match self {
-            Malformed => "Malformed record",
-            TooShort(_) => "Record too short",
-            UnrecognizedCriticalRecord => "Unknown critical record",
-            WrongRecordType => "Incorrect type of record passed",
-        }
-    }
-    fn cause(&self) -> Option<&std::error::Error> {
-        None
-    }
-}
-
 // ------------------------------------------------------------------------
 // Serialization
 // ------------------------------------------------------------------------
@@ -129,10 +81,68 @@ pub fn serialize<T: KeRecordTrait>(record: T) -> Vec<u8> {
     result
 }
 
-impl std::fmt::Display for DeserializeError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.description())
+// ------------------------------------------------------------------------
+// Deserialization
+// ------------------------------------------------------------------------
+
+#[derive(Clone, Debug)]
+pub enum DeserializeError {
+    Parsing(String),
+    UnknownCriticalRecord,
+    UnknownNotCriticalRecord,
+}
+
+/// Deserialize the network bytes into the record.
+///
+/// # Panics
+///
+/// If slice is shorter than the length specified in the length field.
+///
+pub fn deserialize(sender: Party, bytes: &[u8]) -> Result<KeRecord, DeserializeError> {
+    // The first bit of the first byte is the critical bit.
+    let critical = bytes[0] >> 7 == 1;
+
+    // The following 15 bits are the record type number.
+    let record_type = u16::from_be_bytes([bytes[0] & 0x7, bytes[1]]);
+
+    // The third and fourth bytes are the body length.
+    let length = u16::from_be_bytes([bytes[2], bytes[3]]);
+
+    // The body.
+    let body = &bytes[4..4 + usize::from(length)];
+
+    macro_rules! deserialize_body {
+        ( $( ($variant:ident, $record:ident) ),* ) => {
+            if false {
+                // Loop returns ! type.
+                loop { }
+            } $( else if record_type == $record::record_type() {
+                match $record::from_bytes(sender, body) {
+                    Ok(record) => KeRecord::$variant(record),
+                    Err(error) => return Err(DeserializeError::Parsing(error)),
+                }
+            } )* else {
+                if critical {
+                    return Err(DeserializeError::UnknownCriticalRecord);
+                } else {
+                    return Err(DeserializeError::UnknownNotCriticalRecord);
+                }
+            }
+        };
     }
+
+    let record = deserialize_body!(
+        (EndOfMessage, EndOfMessageRecord),
+        (NextProtocol, NextProtocolRecord),
+        (Error, ErrorRecord),
+        (Warning, WarningRecord),
+        (AeadAlgorithm, AeadAlgorithmRecord),
+        (NewCookie, NewCookieRecord),
+        (Server, ServerRecord),
+        (Port, PortRecord)
+    );
+
+    Ok(record)
 }
 
 /// gen_key computes the client and server keys using exporters.
@@ -151,104 +161,4 @@ pub fn gen_key<T: rustls::Session>(session: &T) -> Result<NTSKeys, TLSError> {
     session.export_keying_material(&mut keys.s2c, label, context_s2c)?;
 
     Ok(keys)
-}
-
-fn record_type(n: u16) -> Option<NtsKeType> {
-    match n {
-        0 => Some(EndOfMessage),
-        1 => Some(NextProtocolNegotiation),
-        2 => Some(Error),
-        3 => Some(Warning),
-        4 => Some(AEADAlgorithmNegotiation),
-        5 => Some(NewCookie),
-        6 => Some(ServerNegotiation),
-        7 => Some(PortNegotiation),
-        _ => None,
-    }
-}
-
-/// deserialize_record deserializes an ExKeRecord
-/// https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-18#section-4
-pub fn deserialize_record(buff: &[u8]) -> Result<(Option<ExKeRecord>, usize), DeserializeError> {
-    let mut out = ExKeRecord {
-        contents: vec![],
-        critical: false,
-        record_type: EndOfMessage,
-    };
-    if buff.len() < HEADER_SIZE {
-        return Err(TooShort(HEADER_SIZE));
-    };
-
-    let mut tmp_type = ((buff[0] as u16) << 8) + (buff[1] as u16); // Read a big endian u16 for the type
-    if tmp_type & CRIT_BIT == CRIT_BIT {
-        out.critical = true;
-        tmp_type ^= CRIT_BIT;
-    }
-    let length: usize = ((buff[2] as usize) << 8) + (buff[3] as usize); // Read big endian u16 for length
-    if buff.len() < length + HEADER_SIZE {
-        return Err(TooShort(length + HEADER_SIZE));
-    }
-    out.contents = buff[HEADER_SIZE..length + HEADER_SIZE].to_vec(); // Rest of the packet
-    let unrecognized: bool;
-    match record_type(tmp_type) {
-        Some(rec) => {
-            out.record_type = rec;
-            unrecognized = false
-        }
-        None => {
-            unrecognized = true;
-        }
-    }
-    if unrecognized && out.critical {
-        Err(UnrecognizedCriticalRecord)
-    } else {
-        if unrecognized {
-            Ok((None, length + HEADER_SIZE))
-        } else {
-            Ok((Some(out), length + HEADER_SIZE))
-        }
-    }
-}
-
-/// This extracts the aeads from the AEADAlgorithmNegotation record. The record
-/// may contain multiple algorithms.
-pub fn extract_aead(rec: ExKeRecord) -> Result<Vec<u16>, DeserializeError> {
-    match rec.record_type {
-        AEADAlgorithmNegotiation => parse_u16s(rec.contents),
-        _ => Err(WrongRecordType),
-    }
-}
-
-/// This extracts the port from the port negotiation
-pub fn extract_port(rec: ExKeRecord) -> Result<u16, DeserializeError> {
-    match rec.record_type {
-        PortNegotiation => parse_u16(rec.contents),
-        _ => Err(WrongRecordType),
-    }
-}
-
-/// This extracts the next protocols. Currently only one exists NTP v4.
-pub fn extract_protos(rec: ExKeRecord) -> Result<Vec<u16>, DeserializeError> {
-    match rec.record_type {
-        NextProtocolNegotiation => parse_u16s(rec.contents),
-        _ => Err(WrongRecordType),
-    }
-}
-
-fn parse_u16s(input: Vec<u8>) -> Result<Vec<u16>, DeserializeError> {
-    if input.len() % 2 != 0 {
-        return Err(Malformed);
-    }
-    let mut res = Vec::new();
-    for i in 0..(input.len() / 2) {
-        res.push(((input[2 * i] as u16) << 8) + (input[2 * i + 1] as u16))
-    }
-    Ok(res)
-}
-
-fn parse_u16(input: Vec<u8>) -> Result<u16, DeserializeError> {
-    if input.len() != 2 {
-        return Err(Malformed);
-    }
-    return Ok(((input[0] as u16) << 8) + (input[1] as u16));
 }

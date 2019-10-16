@@ -1,5 +1,9 @@
-FROM docker.cfops.it/debian/stretch:2018.3.0
+FROM rust:1.38.0-stretch
+
+RUN apt-get update && apt-get install -y parallel
 
 COPY . .
+
+RUN cargo build --release
 
 CMD ["./scripts/run_server.sh"]

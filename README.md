@@ -9,10 +9,10 @@ Rust is installed. Look up rust installation instructions: https://www.rust-lang
 
 In order to run the nts client that connects to a server that is already running on the Internet (for instance, `time.cloudflare.com`), run these on your terminal
 
-1. `git clone ssh://git@bitbucket.cfdata.org:7999/crypto/nts.git`
-2. `cd nts`
+1. `git clone https://github.com/cloudflare/nts-rust.git`
+2. `cd nts-rust`
 3. `cargo build --release`
-4. Run the NTS client using `./target/release/nts nts-client [--f | --s] [-p <server-port>] [-c <trusted-cert>] <server-hostname>`
+4. Run the NTS client using `./target/release/cfnts client [--f | --s] [-p <server-port>] [-c <trusted-cert>] <server-hostname>`
 
 Default port is `1234`. 
 
@@ -22,5 +22,5 @@ is supported by the server (preference for ipv6 if supported).
 
 **Examples**:
 
-1. `./target/release/nts nts-client time.cloudflare.com`
-2. `./target/release/nts nts-client kong.rellim.com -p 123`
+1. `./target/release/cfnts client time.cloudflare.com`
+2. `./target/release/cfnts client kong.rellim.com -p 123`

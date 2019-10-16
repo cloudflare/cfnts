@@ -9,6 +9,7 @@
 use std::convert::TryFrom;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
+use std::str::FromStr;
 
 use super::KeRecordTrait;
 use super::Party;
@@ -32,7 +33,7 @@ impl KeRecordTrait for ServerRecord {
         }
     }
 
-    fn record_type(&self) -> u16 {
+    fn record_type() -> u16 {
         6
     }
 
@@ -57,5 +58,31 @@ impl KeRecordTrait for ServerRecord {
             Address::Ipv4Addr(addr) => Vec::from(addr.to_string()),
             Address::Ipv6Addr(addr) => Vec::from(addr.to_string()),
         }
+    }
+
+    fn from_bytes(sender: Party, bytes: &[u8]) -> Result<Self, String> {
+        let body = match String::from_utf8(Vec::from(bytes)) {
+            Ok(body) => body,
+            Err(_) => return Err(String::from("the body is an invalid ascii string")),
+        };
+
+        if !body.is_ascii() {
+            return Err(String::from("the body is an invalid ascii string"));
+        }
+
+        let address = if let Ok(address) = Ipv4Addr::from_str(&body) {
+            Address::Ipv4Addr(address)
+        } else if let Ok(address) = Ipv6Addr::from_str(&body) {
+            Address::Ipv6Addr(address)
+        } else {
+            // If the body is a valid ascii string, but not a valid IPv4 or IPv6, it must be a
+            // hostname.
+            Address::Hostname(body)
+        };
+
+        Ok(ServerRecord {
+            sender,
+            address,
+        })
     }
 }

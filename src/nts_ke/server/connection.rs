@@ -16,19 +16,17 @@ use std::io::{Read, Write};
 use crate::cookie::{make_cookie, NTSKeys};
 use crate::key_rotator::KeyRotator;
 use crate::nts_ke::records::gen_key;
-use crate::nts_ke::records::serialize_record;
-use crate::nts_ke::records::{ExKeRecord, NtsKeType};
+use crate::nts_ke::records::serialize;
 use crate::nts_ke::records::{
     AeadAlgorithmRecord,
     EndOfMessageRecord,
     NextProtocolRecord,
+    NewCookieRecord,
     PortRecord,
 
     KnownAeadAlgorithm,
     KnownNextProtocol,
-
     Party,
-    Serialize,
 };
 
 use super::listener::KeServerListener;
@@ -42,31 +40,27 @@ fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: u16) -> Vec<
     let next_protocol_record = NextProtocolRecord::from(vec![
         KnownNextProtocol::Ntpv4,
     ]);
-
     let aead_record = AeadAlgorithmRecord::from(vec![
         KnownAeadAlgorithm::AeadAesSivCmac256,
     ]);
-
     let port_record = PortRecord::new(Party::Server, port);
-
     let end_record = EndOfMessageRecord;
 
-    response.append(&mut next_protocol_record.serialize());
-    response.append(&mut aead_record.serialize());
+    response.append(&mut serialize(next_protocol_record));
+    response.append(&mut serialize(aead_record));
 
     let rotor = rotator.read().unwrap();
     let (key_id, actual_key) = rotor.latest_key_value();
-    for _i in 1..8 {
+
+    // According to the spec, if the next protocol is NTPv4, we should send eight cookies to the
+    // client.
+    for _ in 1..8 {
         let cookie = make_cookie(keys, actual_key.as_ref(), key_id);
-        let mut cookie_rec = ExKeRecord {
-            critical: false,
-            record_type: NtsKeType::NewCookie,
-            contents: cookie,
-        };
-        response.append(&mut serialize_record(&mut cookie_rec));
+        let cookie_record = NewCookieRecord::from(cookie);
+        response.append(&mut serialize(cookie_record));
     }
-    response.append(&mut port_record.serialize());
-    response.append(&mut end_record.serialize());
+    response.append(&mut serialize(port_record));
+    response.append(&mut serialize(end_record));
     response
 }
 

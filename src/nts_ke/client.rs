@@ -11,11 +11,35 @@ use webpki;
 use webpki_roots;
 
 use super::records;
-use super::records::{DeserializeError::TooShort, *};
 
 use self::ClientError::*;
 use crate::sub_command::client::ClientConfig;
 use crate::cookie::NTSKeys;
+use crate::nts_ke::records::{
+    // Records.
+    AeadAlgorithmRecord,
+    EndOfMessageRecord,
+    NextProtocolRecord,
+
+    // Enums.
+    KnownAeadAlgorithm,
+    KnownNextProtocol,
+    KeRecord,
+    Party,
+
+    // Constants.
+    HEADER_SIZE,
+
+    // Functions.
+    serialize,
+    deserialize,
+
+    // Errors.
+    DeserializeError,
+
+    // Traits.
+    KeRecordTrait,
+};
 
 type Cookie = Vec<u8>;
 
@@ -74,28 +98,36 @@ impl std::fmt::Display for ClientError {
 
 /// Read https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-19#section-4
 fn process_record(
-    rec: records::ExKeRecord,
+    record: records::KeRecord,
     state: &mut ClientState,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if state.finished {
         return Err(Box::new(RecordAfterEnd));
     }
-    match rec.record_type {
-        NtsKeType::EndOfMessage => state.finished = true,
-        NtsKeType::NextProtocolNegotiation => state.next_protocols = extract_protos(rec)?,
-        NtsKeType::Error => return Err(Box::new(ErrorRecord)),
-        NtsKeType::Warning => return Ok(()),
-        NtsKeType::AEADAlgorithmNegotiation => {
-            let schemes = extract_aead(rec)?;
-            state.aead_scheme = schemes[0];
-            if schemes.len() != 1 {
+
+    match record {
+        KeRecord::EndOfMessage(_) => state.finished = true,
+        KeRecord::NextProtocol(record) => {
+            state.next_protocols = record.protocols().iter()
+                .map(|protocol| protocol.as_protocol_id())
+                .collect();
+        },
+        KeRecord::Error(_) => return Err(Box::new(ErrorRecord)),
+        KeRecord::Warning(_) => return Ok(()),
+        KeRecord::AeadAlgorithm(record) => {
+            // TODO: Accessing at index zero can panic.
+            let algorithm = record.algorithms()[0];
+            state.aead_scheme = algorithm.as_algorithm_id();
+
+            if record.algorithms().len() != 1 {
                 return Err(Box::new(InvalidRecord));
             }
-        }
-        NtsKeType::NewCookie => state.cookies.push(rec.contents.clone()),
-        NtsKeType::ServerNegotiation => return Ok(()), // not yet supported
-        NtsKeType::PortNegotiation => state.next_port = extract_port(rec)?,
+        },
+        KeRecord::NewCookie(record) => state.cookies.push(record.into_bytes()),
+        KeRecord::Server(_) => return Ok(()), // not yet supported.
+        KeRecord::Port(record) => state.next_port = record.port(),
     }
+
     Ok(())
 }
 
@@ -157,27 +189,17 @@ pub fn run_nts_ke_client(
 
     let mut tls_stream = rustls::Stream::new(&mut client, &mut stream);
 
-    let mut next_proto = ExKeRecord {
-        critical: true,
-        record_type: NtsKeType::NextProtocolNegotiation,
-        contents: vec![0, 0],
-    };
+    let next_protocol_record = NextProtocolRecord::from(vec![
+        KnownNextProtocol::Ntpv4,
+    ]);
+    let aead_record = AeadAlgorithmRecord::from(vec![
+        KnownAeadAlgorithm::AeadAesSivCmac256,
+    ]);
+    let end_record = EndOfMessageRecord;
 
-    let mut aead_rec = ExKeRecord {
-        critical: false,
-        record_type: NtsKeType::AEADAlgorithmNegotiation,
-        contents: vec![0, 15],
-    };
-
-    let mut end_rec = ExKeRecord {
-        critical: true,
-        record_type: NtsKeType::EndOfMessage,
-        contents: vec![],
-    };
-
-    tls_stream.write(&records::serialize_record(&mut next_proto))?;
-    tls_stream.write(&records::serialize_record(&mut aead_rec))?;
-    tls_stream.write(&records::serialize_record(&mut end_rec))?;
+    tls_stream.write(&serialize(next_protocol_record))?;
+    tls_stream.write(&serialize(aead_record))?;
+    tls_stream.write(&serialize(end_record))?;
     tls_stream.flush()?;
     debug!(logger, "Request transmitted");
     let keys = records::gen_key(tls_stream.sess).unwrap();
@@ -192,52 +214,59 @@ pub fn run_nts_ke_client(
         aead_scheme: DEFAULT_SCHEME,
     };
 
-    let mut curr = 0;
-    let mut readptr = 0;
-    let mut buf = vec![0; 4]; // start with a header
     while state.finished == false {
-        // We now read records from the server and process them.
-        // Buf contains all the data the server sent us. curr points at the last processed
-        // record, readptr points at the last read data.
-        let more = tls_stream.read(&mut buf[readptr..]);
-        if let Err(err) = more {
-            return Err(Box::new(err));
+        let mut header: [u8; HEADER_SIZE] = [0; HEADER_SIZE];
+
+        // We should use `read_exact` here because we always need to read 4 bytes to get the
+        // header.
+        if let Err(error) = tls_stream.read_exact(&mut header[..]) {
+            return Err(Box::new(error));
         }
-        readptr += more.unwrap();
-        loop {
-            // We've read some data, let's see if we get further with it.
-            // This loop reads either 1 or 0 records each time.
-            // It's structured as a loop because reading from an empty buffer
-            // and reading from an insufficiently long buffer both work the same
-            // way. We have no promises enough was read.
-            let rec = records::deserialize_record(&buf[curr..]);
-            match rec {
-                Ok((Some(rec), len)) => {
-                    debug!(logger, "Record: {:?}", rec);
-                    let status = process_record(rec, &mut state);
-                    match status {
-                        Ok(_) => {}
-                        Err(err) => return Err(err),
-                    }
-                    curr += len;
+
+        // Retrieve a body length from the 3rd and 4th bytes of the header.
+        let body_length = u16::from_be_bytes([header[2], header[3]]);
+        let mut body = vec![0; body_length as usize];
+
+        // `read_exact` the length of the body.
+        if let Err(error) = tls_stream.read_exact(body.as_mut_slice()) {
+            return Err(Box::new(error));
+        }
+
+        // Reconstruct the whole record byte array to let the `records` module deserialize it.
+        let mut record_bytes = Vec::from(&header[..]);
+        record_bytes.append(&mut body);
+
+        // `deserialize` has an invariant that the slice needs to be long enough to make it a
+        // valid record, which in this case our slice is exactly as long as specified in the
+        // length field.
+        match deserialize(Party::Client, record_bytes.as_slice()) {
+            Ok(record) => {
+                let status = process_record(record, &mut state);
+                match status {
+                    Ok(_) => {}
+                    Err(err) => return Err(err),
                 }
-                Ok((None, len)) => {
-                    debug!(logger, "Unknown record type");
-                    curr += len;
-                }
-                Err(err) => match err {
-                    TooShort(n) => {
-                        debug!(logger, "minimum length {:}", n);
-                        buf.resize(curr + n, 0);
-                        // The buffer is now at least n bytes beyond curr.
-                        break;
-                    }
-                    _ => {
-                        debug!(logger, "error: {:?}", err);
-                        return Err(Box::new(err));
-                    }
-                },
             }
+            Err(DeserializeError::UnknownNotCriticalRecord) => {
+                // If it's not critical, just ignore the error.
+                debug!(logger, "unknown record type");
+            },
+            Err(DeserializeError::UnknownCriticalRecord) => {
+                // TODO: This should propertly handled by sending an Error record.
+                debug!(logger, "error: unknown critical record");
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "unknown critical record",
+                )));
+            },
+            Err(DeserializeError::Parsing(error)) => {
+                // TODO: This shouldn't be wrapped as a trait object.
+                debug!(logger, "error: {}", error);
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    error,
+                )));
+            },
         }
     }
     debug!(logger, "saw the end of the response");

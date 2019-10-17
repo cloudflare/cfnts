@@ -2,7 +2,7 @@ version: 2
 jobs:
   build:
     docker:
-    - image: circleci/rust:1.35.0-stretch
+    - image: circleci/rust:1.36.0-stretch
     steps:
     - checkout
     - run:
@@ -14,6 +14,18 @@ jobs:
     - run:
         name: Running tests
         command: cargo test --release
+    - run:
+        name: Installing Docker Compose
+        command: |
+            curl -L https://github.com/docker/compose/releases/download/1.19.0/docker-compose-`uname -s`-`uname -m` > ~/docker-compose
+            chmod +x ~/docker-compose
+            sudo mv ~/docker-compose /usr/local/bin/docker-compose
+    - setup_remote_docker
+    - run:
+        name: Starting container and verifying it is working
+        command: |
+            set -x
+            docker-compose up --build --force-recreate --abort-on-container-exit
 workflows:
   main:
     jobs:

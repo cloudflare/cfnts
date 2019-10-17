@@ -1,4 +1,5 @@
-FROM docker-registry.cfdata.org/stash/plat/dockerfiles/debian-stretch/master:2019.1.0
+FROM debian:stretch
+
 RUN apt-get update && \
     apt-get -y install memcached python-pip && \
     pip install python-memcached

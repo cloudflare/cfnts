@@ -1,24 +1,30 @@
-# NTS-Rust
+# cfnts
 
 [![CircleCI](https://circleci.com/gh/cloudflare/nts-rust.svg?style=svg)](https://circleci.com/gh/cloudflare/nts-rust)
 
-NTS-Rust is an implementation of the NTS protocol written in Rust.
+cfnts is an implementation of the NTS protocol written in Rust.
 
 **Prereqs**:
-Rust is installed. Look up rust installation instructions: https://www.rust-lang.org/tools/install
+Rust
 
-In order to run the nts client that connects to a server that is already running on the Internet (for instance, `time.cloudflare.com`), run these on your terminal
+**Building**:
 
-1. `git clone https://github.com/cloudflare/nts-rust.git`
-2. `cd nts-rust`
-3. `cargo build --release`
-4. Run the NTS client using `./target/release/cfnts client [--f | --s] [-p <server-port>] [-c <trusted-cert>] <server-hostname>`
+We use cargo to build the software. `docker-compose up` will spawn several Docker containers that run tests.
+
+**Running**
+Run the NTS client using `./target/release/cfnts client [--4 | --6] [-p <server-port>] [-c <trusted-cert>] [-n <other name>]  <server-hostname>`
 
 Default port is `1234`. 
 
-Using `--f` forces the use of ipv4 for all connections to the server, and using `--s` forces the use of ipv6. 
+Using `-4` forces the use of ipv4 for all connections to the server, and using `--6` forces the use of ipv6. 
 These two arguments are mutually exclusive. If neither of them is used, then the client will use whichever one
 is supported by the server (preference for ipv6 if supported).
+
+To run a server you will need a memcached compatible server, together with a script based on fill-memcached.py that will write
+a new random key into /nts/nts-keys/ every hour and delete old ones. Then you can run the ntp server and the nts server.
+
+This split and use of memcached exists to enable deployments where a small dedicated device serves NTP, while a bigger server carries
+out the key exchange.
 
 **Examples**:
 

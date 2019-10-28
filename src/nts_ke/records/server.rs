@@ -5,7 +5,6 @@
 //! Server negotiation record representation.
 /// This Server negotiation will not be sent from the server because currently, we are not
 /// interested in running an NTP server on different IP address.
-
 use std::convert::TryFrom;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
@@ -25,6 +24,16 @@ pub struct ServerRecord {
     address: Address,
 }
 
+impl ServerRecord {
+    pub fn into_string(self) -> String {
+        match self.address {
+            Address::Hostname(name) => name,
+            Address::Ipv4Addr(addr) => addr.to_string(),
+            Address::Ipv6Addr(addr) => addr.to_string(),
+        }
+    }
+}
+
 impl KeRecordTrait for ServerRecord {
     fn critical(&self) -> bool {
         match self.sender {
@@ -41,10 +50,8 @@ impl KeRecordTrait for ServerRecord {
         match &self.address {
             // We cannot just use `name.len()` because we want to count the bytes not just the
             // runes.
-            Address::Hostname(name) => {
-                u16::try_from(name.as_bytes().len())
-                    .expect("the hostname is too long to fix in the record")
-            },
+            Address::Hostname(name) => u16::try_from(name.as_bytes().len())
+                .expect("the hostname is too long to fix in the record"),
             // Both IPv4 and IPv6 address cannot be too long to fix in the record. It's okay to
             // just cast them here.
             Address::Ipv4Addr(addr) => addr.to_string().len() as u16,
@@ -53,11 +60,7 @@ impl KeRecordTrait for ServerRecord {
     }
 
     fn into_bytes(self) -> Vec<u8> {
-        match self.address {
-            Address::Hostname(name) => Vec::from(name),
-            Address::Ipv4Addr(addr) => Vec::from(addr.to_string()),
-            Address::Ipv6Addr(addr) => Vec::from(addr.to_string()),
-        }
+        Vec::from(self.into_string())
     }
 
     fn from_bytes(sender: Party, bytes: &[u8]) -> Result<Self, String> {
@@ -80,9 +83,6 @@ impl KeRecordTrait for ServerRecord {
             Address::Hostname(body)
         };
 
-        Ok(ServerRecord {
-            sender,
-            address,
-        })
+        Ok(ServerRecord { sender, address })
     }
 }

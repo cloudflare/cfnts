@@ -43,7 +43,7 @@ impl KeRecordTrait for ErrorRecord {
 
     fn from_bytes(_: Party, bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != 2 {
-            return Err(String::from("the body length of Error must be two."))
+            return Err(String::from("the body length of Error must be two."));
         }
 
         let error_code = u16::from_be_bytes([bytes[0], bytes[1]]);
@@ -58,6 +58,6 @@ impl KeRecordTrait for ErrorRecord {
             return Ok(ErrorRecord(kind));
         }
 
-        return Err(String::from("unknown error code"))
+        return Err(String::from("unknown error code"));
     }
 }

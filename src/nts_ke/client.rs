@@ -13,33 +13,32 @@ use webpki_roots;
 use super::records;
 
 use self::ClientError::*;
-use crate::sub_command::client::ClientConfig;
 use crate::cookie::NTSKeys;
 use crate::nts_ke::records::{
+    deserialize,
+
+    // Functions.
+    serialize,
     // Records.
     AeadAlgorithmRecord,
-    EndOfMessageRecord,
-    NextProtocolRecord,
+    // Errors.
+    DeserializeError,
 
+    EndOfMessageRecord,
+    KeRecord,
+    // Traits.
+    KeRecordTrait,
     // Enums.
     KnownAeadAlgorithm,
     KnownNextProtocol,
-    KeRecord,
+    NextProtocolRecord,
+
     Party,
 
     // Constants.
     HEADER_SIZE,
-
-    // Functions.
-    serialize,
-    deserialize,
-
-    // Errors.
-    DeserializeError,
-
-    // Traits.
-    KeRecordTrait,
 };
+use crate::sub_command::client::ClientConfig;
 
 type Cookie = Vec<u8>;
 
@@ -67,7 +66,7 @@ pub struct NtsKeResult {
     pub next_server: String,
     pub next_port: u16,
     pub keys: NTSKeys,
-    pub use_ipv4: Option<bool>
+    pub use_ipv4: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -108,10 +107,12 @@ fn process_record(
     match record {
         KeRecord::EndOfMessage(_) => state.finished = true,
         KeRecord::NextProtocol(record) => {
-            state.next_protocols = record.protocols().iter()
+            state.next_protocols = record
+                .protocols()
+                .iter()
                 .map(|protocol| protocol.as_protocol_id())
                 .collect();
-        },
+        }
         KeRecord::Error(_) => return Err(Box::new(ErrorRecord)),
         KeRecord::Warning(_) => return Ok(()),
         KeRecord::AeadAlgorithm(record) => {
@@ -122,9 +123,9 @@ fn process_record(
             if record.algorithms().len() != 1 {
                 return Err(Box::new(InvalidRecord));
             }
-        },
+        }
         KeRecord::NewCookie(record) => state.cookies.push(record.into_bytes()),
-        KeRecord::Server(_) => return Ok(()), // not yet supported.
+        KeRecord::Server(record) => state.next_server = record.into_string(),
         KeRecord::Port(record) => state.next_port = record.port(),
     }
 
@@ -134,7 +135,7 @@ fn process_record(
 /// run_nts_client executes the nts client with the config in config file
 pub fn run_nts_ke_client(
     logger: &slog::Logger,
-    client_config: ClientConfig
+    client_config: ClientConfig,
 ) -> Result<NtsKeResult, Box<dyn Error>> {
     let mut tls_config = rustls::ClientConfig::new();
     let alpn_proto = String::from("ntske/1");
@@ -147,10 +148,10 @@ pub fn run_nts_ke_client(
             tls_config.root_store.add(&cert)?;
         }
         None => {
-                tls_config
+            tls_config
                 .root_store
                 .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
-        },
+        }
     }
 
     let rc_config = Arc::new(tls_config);
@@ -189,12 +190,8 @@ pub fn run_nts_ke_client(
 
     let mut tls_stream = rustls::Stream::new(&mut client, &mut stream);
 
-    let next_protocol_record = NextProtocolRecord::from(vec![
-        KnownNextProtocol::Ntpv4,
-    ]);
-    let aead_record = AeadAlgorithmRecord::from(vec![
-        KnownAeadAlgorithm::AeadAesSivCmac256,
-    ]);
+    let next_protocol_record = NextProtocolRecord::from(vec![KnownNextProtocol::Ntpv4]);
+    let aead_record = AeadAlgorithmRecord::from(vec![KnownAeadAlgorithm::AeadAesSivCmac256]);
     let end_record = EndOfMessageRecord;
 
     tls_stream.write(&serialize(next_protocol_record))?;
@@ -244,13 +241,15 @@ pub fn run_nts_ke_client(
                 let status = process_record(record, &mut state);
                 match status {
                     Ok(_) => {}
-                    Err(err) => return Err(err),
+                    Err(err) => {
+                        return Err(err);
+                    }
                 }
             }
             Err(DeserializeError::UnknownNotCriticalRecord) => {
                 // If it's not critical, just ignore the error.
                 debug!(logger, "unknown record type");
-            },
+            }
             Err(DeserializeError::UnknownCriticalRecord) => {
                 // TODO: This should propertly handled by sending an Error record.
                 debug!(logger, "error: unknown critical record");
@@ -258,7 +257,7 @@ pub fn run_nts_ke_client(
                     std::io::ErrorKind::Other,
                     "unknown critical record",
                 )));
-            },
+            }
             Err(DeserializeError::Parsing(error)) => {
                 // TODO: This shouldn't be wrapped as a trait object.
                 debug!(logger, "error: {}", error);
@@ -266,7 +265,7 @@ pub fn run_nts_ke_client(
                     std::io::ErrorKind::Other,
                     error,
                 )));
-            },
+            }
         }
     }
     debug!(logger, "saw the end of the response");
@@ -279,6 +278,6 @@ pub fn run_nts_ke_client(
         next_server: state.next_server,
         next_port: state.next_port,
         keys: state.keys,
-        use_ipv4: client_config.use_ipv4
+        use_ipv4: client_config.use_ipv4,
     })
 }

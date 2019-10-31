@@ -1,6 +1,6 @@
 # cfnts
 
-[![CircleCI](https://circleci.com/gh/cloudflare/cfrust.svg?style=svg)](https://circleci.com/gh/cloudflare/cfrust)
+[![CircleCI](https://circleci.com/gh/cloudflare/cfnts.svg?style=svg)](https://circleci.com/gh/cloudflare/cfnts)
 
 cfnts is an implementation of the NTS protocol written in Rust.
 

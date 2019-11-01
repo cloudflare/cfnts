@@ -16,7 +16,7 @@ Run the NTS client using `./target/release/cfnts client [--4 | --6] [-p <server-
 
 Default port is `1234`. 
 
-Using `-4` forces the use of ipv4 for all connections to the server, and using `--6` forces the use of ipv6. 
+Using `--4` forces the use of ipv4 for all connections to the server, and using `--6` forces the use of ipv6. 
 These two arguments are mutually exclusive. If neither of them is used, then the client will use whichever one
 is supported by the server (preference for ipv6 if supported).
 

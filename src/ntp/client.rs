@@ -44,7 +44,7 @@ impl std::error::Error for NtpClientError {
             _ => "Connection to server failed because address could not be resolved",
         }
     }
-    fn cause(&self) -> Option<&std::error::Error> {
+    fn cause(&self) -> Option<&dyn std::error::Error> {
         None
     }
 }

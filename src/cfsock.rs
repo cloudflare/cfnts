@@ -1,11 +1,11 @@
 use libc::*;
 use net2::{TcpBuilder, UdpBuilder};
 use std::net::{SocketAddr, SocketAddr::*};
-use std::io::{Error, ErrorKind};
 use std::os::unix::io::AsRawFd;
 
 #[cfg(target_os = "linux")]
 fn set_freebind(fd: c_int) -> Result<(), std::io::Error> {
+    use std::io::{Error, ErrorKind};
     const IP_FREEBIND: libc::c_int = 0xf;
     match unsafe {
         setsockopt(

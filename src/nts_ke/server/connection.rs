@@ -54,7 +54,7 @@ fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: u16) -> Vec<
 
     // According to the spec, if the next protocol is NTPv4, we should send eight cookies to the
     // client.
-    for _ in 1..8 {
+    for _ in 0..8 {
         let cookie = make_cookie(keys, actual_key.as_ref(), key_id);
         let cookie_record = NewCookieRecord::from(cookie);
         response.append(&mut serialize(cookie_record));

@@ -2,7 +2,7 @@ import memcache
 import time
 import math
 
-print "filling memcache"
+print("filling memcache")
 servers = ["localhost:11211"]
 mc = memcache.Client(servers)
 rand = open("/dev/urandom", "rb")

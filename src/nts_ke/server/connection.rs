@@ -16,17 +16,32 @@ use std::io::{Read, Write};
 use crate::cookie::{make_cookie, NTSKeys};
 use crate::key_rotator::KeyRotator;
 use crate::nts_ke::records::gen_key;
-use crate::nts_ke::records::serialize;
 use crate::nts_ke::records::{
+    // Functions.
+    serialize,
+    deserialize,
+    process_record,
+
+    // Records.
     AeadAlgorithmRecord,
     EndOfMessageRecord,
     NextProtocolRecord,
     NewCookieRecord,
     PortRecord,
 
+    // Errors.
+    DeserializeError,
+
+    // Structs.
+    RecievedNtsKeRecordState,
+
+    // Enums.
     KnownAeadAlgorithm,
     KnownNextProtocol,
     Party,
+
+    // Constants.
+    HEADER_SIZE,
 };
 
 use super::listener::KeServerListener;
@@ -95,6 +110,9 @@ pub struct KeServerConn {
     /// The status of the connection.
     state: KeServerConnState,
 
+    /// The state of NTS-KE.
+    ntske_state: RecievedNtsKeRecordState,
+
     /// Logger.
     logger: slog::Logger,
 }
@@ -112,14 +130,24 @@ impl KeServerConn {
         // Create a child logger for the connection.
         let logger = listener.logger().new(slog::o!("client" => listener.addr().to_string()));
 
+        let ntske_state = RecievedNtsKeRecordState {
+            finished: false,
+            next_protocols: Vec::new(),
+            aead_scheme: Vec::new(),
+            cookies: Vec::new(),
+            next_server: None,
+            next_port: None,
+        };
+
         KeServerConn {
             // Create an `Arc` reference.
             server_state: server_state.clone(),
             tcp_stream,
             tls_session,
             token,
-            logger,
             state: KeServerConnState::Connected,
+            ntske_state,
+            logger,
         }
     }
 
@@ -199,6 +227,61 @@ impl KeServerConn {
             }
 
             let keys = gen_key(&self.tls_session).unwrap();
+            let mut buf = &buf[..];
+            while self.ntske_state.finished == false {
+                // need to read 4 bytes to get the header.
+                let mut header: [u8; HEADER_SIZE] = [0; HEADER_SIZE];
+                if let Err(error) = buf.read_exact(&mut header) {
+                    error!(self.logger, "read nts-ke record header: {}", error);
+                    self.shutdown();
+                    return;
+                }
+
+                // need to read the body_length to get the body.
+                let body_length = u16::from_be_bytes([header[2], header[3]]);
+                let mut body = vec![0; body_length as usize];
+                if let Err(error) = buf.read_exact(&mut body) {
+                    error!(self.logger, "read nts-ke record body: {}", error);
+                    self.shutdown();
+                    return;
+                }
+
+                // Reconstruct the whole record byte array to let the `records` module deserialize it.
+                let mut record_bytes = Vec::from(&header[..]);
+                record_bytes.append(&mut body);
+
+                match deserialize(Party::Server, record_bytes.as_slice()) {
+                    Ok(record) => {
+                        let status = process_record(record, &mut self.ntske_state);
+                        match status {
+                            Ok(_) => {}
+                            Err(err) => {
+                                error!(self.logger, "process nts-ke record: {}", err);
+                                self.shutdown();
+                                return;
+                            }
+                        }
+                    }
+                    Err(DeserializeError::UnknownNotCriticalRecord) => {
+                        // If it's not critical, just ignore the error.
+                        debug!(self.logger, "unknown record type");
+                        self.shutdown();
+                        return;
+                    }
+                    Err(DeserializeError::UnknownCriticalRecord) => {
+                        // TODO: This should propertly handled by sending an Error record.
+                        debug!(self.logger, "error: unknown critical record");
+                        self.shutdown();
+                        return;
+                    }
+                    Err(DeserializeError::Parsing(error)) => {
+                        // TODO: This shouldn't be wrapped as a trait object.
+                        debug!(self.logger, "error: {}", error);
+                        self.shutdown();
+                        return;
+                    }
+                }
+            }
 
             // We have to make sure that the response is not sent yet.
             if self.state == KeServerConnState::Opened {

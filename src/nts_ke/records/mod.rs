@@ -24,6 +24,7 @@ pub use self::new_cookie::*;
 pub use self::server::*;
 pub use self::port::*;
 
+use std::fmt;
 use rustls::TLSError;
 
 use crate::cookie::NTSKeys;
@@ -161,4 +162,81 @@ pub fn gen_key<T: rustls::Session>(session: &T) -> Result<NTSKeys, TLSError> {
     session.export_keying_material(&mut keys.s2c, label, context_s2c)?;
 
     Ok(keys)
+}
+
+// ------------------------------------------------------------------------
+// Record Process
+// ------------------------------------------------------------------------
+
+type Cookie = Vec<u8>;
+
+#[derive(Clone, Debug)]
+pub struct RecievedNtsKeRecordState {
+    pub finished: bool,
+    pub next_protocols: Vec<u16>,
+    pub aead_scheme: Vec<u16>,
+    pub cookies: Vec<Cookie>,
+    pub next_server: Option<String>,
+    pub next_port: Option<u16>,
+}
+
+#[derive(Debug, Clone)]
+pub enum NtsKeParseError {
+    RecordAfterEnd,
+    ErrorRecord,
+    InvalidRecord,
+    NoIpv4AddrFound,
+    NoIpv6AddrFound,
+}
+
+impl std::error::Error for NtsKeParseError {
+    fn description(&self) -> &str {
+        match self {
+            _ => "Something is wrong",
+        }
+    }
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        None
+    }
+}
+
+impl fmt::Display for NtsKeParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "NTS-KE Record Parse Error")
+    }
+}
+
+/// Read https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-19#section-4
+pub fn process_record(
+    record: KeRecord,
+    state: &mut RecievedNtsKeRecordState,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if state.finished {
+        return Err(Box::new(NtsKeParseError::RecordAfterEnd));
+    }
+
+    match record {
+        KeRecord::EndOfMessage(_) => state.finished = true,
+        KeRecord::NextProtocol(record) => {
+            state.next_protocols = record
+                .protocols()
+                .iter()
+                .map(|protocol| protocol.as_protocol_id())
+                .collect();
+        }
+        KeRecord::Error(_) => return Err(Box::new(NtsKeParseError::ErrorRecord)),
+        KeRecord::Warning(_) => return Ok(()),
+        KeRecord::AeadAlgorithm(record) => {
+            state.aead_scheme = record
+                .algorithms()
+                .iter()
+                .map(|algorithm| algorithm.as_algorithm_id())
+                .collect();
+        }
+        KeRecord::NewCookie(record) => state.cookies.push(record.into_bytes()),
+        KeRecord::Server(record) => state.next_server = Some(record.into_string()),
+        KeRecord::Port(record) => state.next_port = Some(record.port()),
+    }
+
+    Ok(())
 }

@@ -48,14 +48,13 @@ const DEFAULT_SCHEME: u16 = 0;
 const TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Debug)]
-struct ClientState {
+struct RecievedNtsKeRecordState {
     finished: bool,
-    cookies: Vec<Cookie>,
     next_protocols: Vec<u16>,
-    aead_scheme: u16,
-    next_port: u16,
-    next_server: String,
-    keys: NTSKeys,
+    aead_scheme: Vec<u16>,
+    cookies: Vec<Cookie>,
+    next_server: Option<String>,
+    next_port: Option<u16>,
 }
 
 #[derive(Clone, Debug)]
@@ -98,7 +97,7 @@ impl std::fmt::Display for ClientError {
 /// Read https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-19#section-4
 fn process_record(
     record: records::KeRecord,
-    state: &mut ClientState,
+    state: &mut RecievedNtsKeRecordState,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if state.finished {
         return Err(Box::new(RecordAfterEnd));
@@ -116,17 +115,15 @@ fn process_record(
         KeRecord::Error(_) => return Err(Box::new(ErrorRecord)),
         KeRecord::Warning(_) => return Ok(()),
         KeRecord::AeadAlgorithm(record) => {
-            // TODO: Accessing at index zero can panic.
-            let algorithm = record.algorithms()[0];
-            state.aead_scheme = algorithm.as_algorithm_id();
-
-            if record.algorithms().len() != 1 {
-                return Err(Box::new(InvalidRecord));
-            }
+            state.aead_scheme = record
+                .algorithms()
+                .iter()
+                .map(|algorithm| algorithm.as_algorithm_id())
+                .collect();
         }
         KeRecord::NewCookie(record) => state.cookies.push(record.into_bytes()),
-        KeRecord::Server(record) => state.next_server = record.into_string(),
-        KeRecord::Port(record) => state.next_port = record.port(),
+        KeRecord::Server(record) => state.next_server = Some(record.into_string()),
+        KeRecord::Port(record) => state.next_port = Some(record.port()),
     }
 
     Ok(())
@@ -201,14 +198,13 @@ pub fn run_nts_ke_client(
     debug!(logger, "Request transmitted");
     let keys = records::gen_key(tls_stream.sess).unwrap();
 
-    let mut state = ClientState {
+    let mut state = RecievedNtsKeRecordState {
         finished: false,
-        cookies: Vec::new(),
         next_protocols: Vec::new(),
-        next_server: client_config.host.clone(),
-        next_port: DEFAULT_NTP_PORT,
-        keys: keys,
-        aead_scheme: DEFAULT_SCHEME,
+        aead_scheme: Vec::new(),
+        cookies: Vec::new(),
+        next_server: None,
+        next_port: None,
     };
 
     while state.finished == false {
@@ -271,13 +267,19 @@ pub fn run_nts_ke_client(
     debug!(logger, "saw the end of the response");
     stream.shutdown(Shutdown::Both)?;
 
+    let aead_scheme = if state.aead_scheme.is_empty() {
+        DEFAULT_SCHEME
+    } else {
+        state.aead_scheme[0]
+    };
+
     Ok(NtsKeResult {
-        aead_scheme: state.aead_scheme,
+        aead_scheme: aead_scheme,
         cookies: state.cookies,
         next_protocols: state.next_protocols,
-        next_server: state.next_server,
-        next_port: state.next_port,
-        keys: state.keys,
+        next_server: state.next_server.unwrap_or(client_config.host.clone()),
+        next_port: state.next_port.unwrap_or(DEFAULT_NTP_PORT),
+        keys: keys,
         use_ipv4: client_config.use_ipv4,
     })
 }

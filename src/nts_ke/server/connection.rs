@@ -236,25 +236,23 @@ impl KeServerConn {
 
             while self.ntske_state.finished == false {
                 // need to read 4 bytes to get the header.
-                if self.ntske_buffer.len() < 4 {
+                if reader.len() < HEADER_SIZE {
                     info!(self.logger, "readable nts-ke stream is not enough to read header");
+                    self.ntske_buffer = Vec::from(reader);
                     return;
                 }
-                let mut header: [u8; HEADER_SIZE] = [0; HEADER_SIZE];
-                reader.read_exact(&mut header).unwrap();
 
                 // need to read the body_length to get the body.
-                let body_length = u16::from_be_bytes([header[2], header[3]]) as usize;
-                if self.ntske_buffer.len() < body_length {
+                let body_length = u16::from_be_bytes([reader[2], reader[3]]) as usize;
+                if reader.len() < HEADER_SIZE + body_length {
                     info!(self.logger, "readable nts-ke stream is not enough to read body");
+                    self.ntske_buffer = Vec::from(reader);
                     return;
                 }
-                let mut body = vec![0; body_length];
-                reader.read_exact(&mut body).unwrap();
 
                 // Reconstruct the whole record byte array to let the `records` module deserialize it.
-                let mut record_bytes = Vec::from(&header[..]);
-                record_bytes.append(&mut body);
+                let mut record_bytes = vec![0; HEADER_SIZE + body_length];
+                reader.read_exact(&mut record_bytes).unwrap();
 
                 match deserialize(Party::Server, record_bytes.as_slice()) {
                     Ok(record) => {

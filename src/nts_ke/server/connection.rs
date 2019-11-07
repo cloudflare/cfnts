@@ -113,6 +113,9 @@ pub struct KeServerConn {
     /// The state of NTS-KE.
     ntske_state: RecievedNtsKeRecordState,
 
+    /// The buffer of NTS-KE Stream.
+    ntske_buffer: Vec<u8>,
+
     /// Logger.
     logger: slog::Logger,
 }
@@ -147,6 +150,7 @@ impl KeServerConn {
             token,
             state: KeServerConnState::Connected,
             ntske_state,
+            ntske_buffer: Vec::new(),
             logger,
         }
     }
@@ -219,6 +223,8 @@ impl KeServerConn {
 
         if !buf.is_empty() {
             debug!(self.logger, "plaintext read {},", buf.len());
+            self.ntske_buffer.append(&mut buf);
+            let mut reader = &self.ntske_buffer[..];
 
             // The plaintext is not empty. It means that the handshake is also done. We can change
             // the state now.
@@ -227,24 +233,24 @@ impl KeServerConn {
             }
 
             let keys = gen_key(&self.tls_session).unwrap();
-            let mut buf = &buf[..];
+
             while self.ntske_state.finished == false {
                 // need to read 4 bytes to get the header.
-                let mut header: [u8; HEADER_SIZE] = [0; HEADER_SIZE];
-                if let Err(error) = buf.read_exact(&mut header) {
-                    error!(self.logger, "read nts-ke record header: {}", error);
-                    self.shutdown();
+                if self.ntske_buffer.len() < 4 {
+                    info!(self.logger, "readable nts-ke stream is not enough to read header");
                     return;
                 }
+                let mut header: [u8; HEADER_SIZE] = [0; HEADER_SIZE];
+                reader.read_exact(&mut header).unwrap();
 
                 // need to read the body_length to get the body.
-                let body_length = u16::from_be_bytes([header[2], header[3]]);
-                let mut body = vec![0; body_length as usize];
-                if let Err(error) = buf.read_exact(&mut body) {
-                    error!(self.logger, "read nts-ke record body: {}", error);
-                    self.shutdown();
+                let body_length = u16::from_be_bytes([header[2], header[3]]) as usize;
+                if self.ntske_buffer.len() < body_length {
+                    info!(self.logger, "readable nts-ke stream is not enough to read body");
                     return;
                 }
+                let mut body = vec![0; body_length];
+                reader.read_exact(&mut body).unwrap();
 
                 // Reconstruct the whole record byte array to let the `records` module deserialize it.
                 let mut record_bytes = Vec::from(&header[..]);

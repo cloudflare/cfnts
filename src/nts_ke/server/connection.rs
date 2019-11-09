@@ -269,7 +269,6 @@ impl KeServerConn {
                     Err(DeserializeError::UnknownNotCriticalRecord) => {
                         // If it's not critical, just ignore the error.
                         debug!(self.logger, "unknown record type");
-                        self.shutdown();
                         return;
                     }
                     Err(DeserializeError::UnknownCriticalRecord) => {

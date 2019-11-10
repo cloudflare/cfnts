@@ -269,7 +269,6 @@ impl KeServerConn {
                     Err(DeserializeError::UnknownNotCriticalRecord) => {
                         // If it's not critical, just ignore the error.
                         debug!(self.logger, "unknown record type");
-                        return;
                     }
                     Err(DeserializeError::UnknownCriticalRecord) => {
                         // TODO: This should propertly handled by sending an Error record.

@@ -184,7 +184,6 @@ pub struct RecievedNtsKeRecordState {
 pub enum NtsKeParseError {
     RecordAfterEnd,
     ErrorRecord,
-    InvalidRecord,
     NoIpv4AddrFound,
     NoIpv6AddrFound,
 }

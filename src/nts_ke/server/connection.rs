@@ -234,7 +234,7 @@ impl KeServerConn {
 
             let keys = gen_key(&self.tls_session).unwrap();
 
-            while self.ntske_state.finished == false {
+            while !self.ntske_state.finished {
                 // need to read 4 bytes to get the header.
                 if reader.len() < HEADER_SIZE {
                     info!(self.logger, "readable nts-ke stream is not enough to read header");

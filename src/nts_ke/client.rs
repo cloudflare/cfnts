@@ -136,7 +136,7 @@ pub fn run_nts_ke_client(
         next_port: None,
     };
 
-    while state.finished == false {
+    while !state.finished {
         let mut header: [u8; HEADER_SIZE] = [0; HEADER_SIZE];
 
         // We should use `read_exact` here because we always need to read 4 bytes to get the

@@ -171,7 +171,7 @@ pub fn gen_key<T: rustls::Session>(session: &T) -> Result<NTSKeys, TLSError> {
 type Cookie = Vec<u8>;
 
 #[derive(Clone, Debug)]
-pub struct RecievedNtsKeRecordState {
+pub struct ReceivedNtsKeRecordState {
     pub finished: bool,
     pub next_protocols: Vec<u16>,
     pub aead_scheme: Vec<u16>,
@@ -208,7 +208,7 @@ impl fmt::Display for NtsKeParseError {
 /// Read https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-19#section-4
 pub fn process_record(
     record: KeRecord,
-    state: &mut RecievedNtsKeRecordState,
+    state: &mut ReceivedNtsKeRecordState,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if state.finished {
         return Err(Box::new(NtsKeParseError::RecordAfterEnd));

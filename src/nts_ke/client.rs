@@ -33,7 +33,7 @@ use crate::nts_ke::records::{
     Party,
 
     // Structs.
-    RecievedNtsKeRecordState,
+    ReceivedNtsKeRecordState,
 
     // Constants.
     HEADER_SIZE,
@@ -127,7 +127,7 @@ pub fn run_nts_ke_client(
     debug!(logger, "Request transmitted");
     let keys = records::gen_key(tls_stream.sess).unwrap();
 
-    let mut state = RecievedNtsKeRecordState {
+    let mut state = ReceivedNtsKeRecordState {
         finished: false,
         next_protocols: Vec::new(),
         aead_scheme: Vec::new(),

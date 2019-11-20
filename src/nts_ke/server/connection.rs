@@ -33,7 +33,7 @@ use crate::nts_ke::records::{
     DeserializeError,
 
     // Structs.
-    RecievedNtsKeRecordState,
+    ReceivedNtsKeRecordState,
 
     // Enums.
     KnownAeadAlgorithm,
@@ -87,7 +87,7 @@ pub enum KeServerConnState {
     TlsHandshaking,
     /// The TLS handshake is done. It's opened for requests now.
     Opened,
-    /// The reponse is sent after getting a good request.
+    /// The response is sent after getting a good request.
     ResponseSent,
     /// The connection is closed.
     Closed,
@@ -111,7 +111,7 @@ pub struct KeServerConn {
     state: KeServerConnState,
 
     /// The state of NTS-KE.
-    ntske_state: RecievedNtsKeRecordState,
+    ntske_state: ReceivedNtsKeRecordState,
 
     /// The buffer of NTS-KE Stream.
     ntske_buffer: Vec<u8>,
@@ -133,7 +133,7 @@ impl KeServerConn {
         // Create a child logger for the connection.
         let logger = listener.logger().new(slog::o!("client" => listener.addr().to_string()));
 
-        let ntske_state = RecievedNtsKeRecordState {
+        let ntske_state = ReceivedNtsKeRecordState {
             finished: false,
             next_protocols: Vec::new(),
             aead_scheme: Vec::new(),
@@ -291,7 +291,7 @@ impl KeServerConn {
                 self.tls_session
                     .write_all(&response(keys, &self.server_state.rotator,
                                          self.server_state.config.next_port)).unwrap();
-                // Mark that the reponse is sent.
+                // Mark that the response is sent.
                 self.state = KeServerConnState::ResponseSent;
             }
         }

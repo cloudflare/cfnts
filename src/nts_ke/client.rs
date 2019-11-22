@@ -194,9 +194,10 @@ pub fn run_nts_ke_client(
     let aead_record = AeadAlgorithmRecord::from(vec![KnownAeadAlgorithm::AeadAesSivCmac256]);
     let end_record = EndOfMessageRecord;
 
-    tls_stream.write(&serialize(next_protocol_record))?;
-    tls_stream.write(&serialize(aead_record))?;
-    tls_stream.write(&serialize(end_record))?;
+    let clientrec = &mut serialize(next_protocol_record);
+    clientrec.append(&mut serialize(aead_record));
+    clientrec.append(&mut serialize(end_record));
+    tls_stream.write(clientrec)?;
     tls_stream.flush()?;
     debug!(logger, "Request transmitted");
     let keys = records::gen_key(tls_stream.sess).unwrap();
@@ -269,7 +270,7 @@ pub fn run_nts_ke_client(
         }
     }
     debug!(logger, "saw the end of the response");
-    stream.shutdown(Shutdown::Both)?;
+    stream.shutdown(Shutdown::Write)?;
 
     Ok(NtsKeResult {
         aead_scheme: state.aead_scheme,

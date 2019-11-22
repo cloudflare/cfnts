@@ -270,7 +270,7 @@ pub fn run_nts_ke_client(
         }
     }
     debug!(logger, "saw the end of the response");
-    stream.shutdown(Shutdown::Both)?;
+    stream.shutdown(Shutdown::Write)?;
 
     Ok(NtsKeResult {
         aead_scheme: state.aead_scheme,

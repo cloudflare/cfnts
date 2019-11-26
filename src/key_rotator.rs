@@ -11,7 +11,6 @@ use memcache::MemcacheError;
 
 use prometheus::{opts, register_counter, register_int_counter, IntCounter};
 
-use ring::digest;
 use ring::hmac;
 
 use std::collections::HashMap;
@@ -109,7 +108,7 @@ pub struct KeyRotator {
     latest_key_id: KeyId,
 
     /// Cache store.
-    cache: HashMap<KeyId, hmac::Signature>,
+    cache: HashMap<KeyId, hmac::Tag>,
 
     /// Logger.
     // TODO: since we don't use the logger now, I will put an `allow(dead_code)` here first. I will
@@ -241,7 +240,7 @@ impl KeyRotator {
     // It should be private. Don't make it public.
     fn cache_insert(&mut self, key_id: KeyId, value: &[u8]) {
         // Create a MAC key.
-        let mac_key = hmac::SigningKey::new(&digest::SHA256, self.master_key.as_bytes());
+        let mac_key = hmac::Key::new(hmac::HMAC_SHA256, self.master_key.as_bytes());
         // Generating a MAC tag with a MAC key.
         let tag = hmac::sign(&mac_key, value);
 
@@ -255,13 +254,13 @@ impl KeyRotator {
     }
 
     /// Return the latest key id and hmac tag of the rotator.
-    pub fn latest_key_value(&self) -> (KeyId, &hmac::Signature) {
+    pub fn latest_key_value(&self) -> (KeyId, &hmac::Tag) {
         // This unwrap cannot panic because the HashMap will always contain the latest key id.
         (self.latest_key_id, self.get(self.latest_key_id).unwrap())
     }
 
     /// Return an entry in the cache using a key id.
-    pub fn get(&self, key_id: KeyId) -> Option<&hmac::Signature> {
+    pub fn get(&self, key_id: KeyId) -> Option<&hmac::Tag> {
         self.cache.get(&key_id)
     }
 }

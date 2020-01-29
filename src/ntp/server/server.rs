@@ -1,18 +1,15 @@
-use crate::cfsock;
 use super::config::NtpServerConfig;
+use crate::cfsock;
 use crate::cookie::{eat_cookie, get_keyid, make_cookie, NTSKeys, COOKIE_SIZE};
-use crate::metrics;
 use crate::key_rotator::{periodic_rotate, KeyRotator};
+use crate::metrics;
 
 use lazy_static::lazy_static;
 use prometheus::{opts, register_counter, register_int_counter, IntCounter};
 use slog::{error, info};
 
 use std::io::{Error, ErrorKind};
-use std::net::{
-    SocketAddr,
-    ToSocketAddrs, UdpSocket,
-};
+use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
 use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, RwLock};
 use std::thread;
@@ -201,19 +198,18 @@ fn run_server(
 }
 
 /// start_ntp_server runs the ntp server with the config specified in config_filename
-pub fn start_ntp_server(
-    config: NtpServerConfig,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn start_ntp_server(config: NtpServerConfig) -> Result<(), Box<dyn std::error::Error>> {
     let logger = config.logger().clone();
 
     info!(logger, "Initializing keys with memcached");
 
     let key_rotator = KeyRotator::connect(
         String::from("/nts/nts-keys"), // prefix
-        config.memcached_url.clone(), // memcached_url
-        config.cookie_key.clone(), // master_key
-        logger.clone(), // logger
-    ).expect("error connecting to the memcached server");
+        config.memcached_url.clone(),  // memcached_url
+        config.cookie_key.clone(),     // master_key
+        logger.clone(),                // logger
+    )
+    .expect("error connecting to the memcached server");
 
     let keys = Arc::new(RwLock::new(key_rotator));
     periodic_rotate(keys.clone());
@@ -274,8 +270,7 @@ pub fn start_ntp_server(
             use_ipv4 = false;
         }
         thread::spawn(move || {
-            run_server(socket, keys, servstate, logger, use_ipv4)
-                .expect("server could not be run");
+            run_server(socket, keys, servstate, logger, use_ipv4).expect("server could not be run");
             drop(wg);
         });
     }
@@ -366,14 +361,12 @@ fn response(
                     Some(key) => {
                         let nts_keys = eat_cookie(&cookie.contents, key.as_ref());
                         match nts_keys {
-                            Some(nts_dir_keys) => {
-                                Ok(process_nts(
-                                    resp_header,
-                                    nts_dir_keys,
-                                    cookie_keys.clone(),
-                                    query,
-                                ))
-                            },
+                            Some(nts_dir_keys) => Ok(process_nts(
+                                resp_header,
+                                nts_dir_keys,
+                                cookie_keys.clone(),
+                                query,
+                            )),
                             None => {
                                 UNDECRYPTABLE_COOKIE_COUNTER.inc();
                                 error!(logger, "undecryptable cookie with keyid {:x?}", keyid);
@@ -454,6 +447,7 @@ fn nts_response(
         ext_type: NTSCookie,
         contents: cookie,
     });
+    resp_packet.header.transmit_timestamp = ntp_timestamp(SystemTime::now()); // Update at last possible time
     resp_packet
 }
 

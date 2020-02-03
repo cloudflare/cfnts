@@ -16,17 +16,32 @@ use std::io::{Read, Write};
 use crate::cookie::{make_cookie, NTSKeys};
 use crate::key_rotator::KeyRotator;
 use crate::nts_ke::records::gen_key;
-use crate::nts_ke::records::serialize;
 use crate::nts_ke::records::{
+    // Functions.
+    serialize,
+    deserialize,
+    process_record,
+
+    // Records.
     AeadAlgorithmRecord,
     EndOfMessageRecord,
     NextProtocolRecord,
     NewCookieRecord,
     PortRecord,
 
+    // Errors.
+    DeserializeError,
+
+    // Structs.
+    ReceivedNtsKeRecordState,
+
+    // Enums.
     KnownAeadAlgorithm,
     KnownNextProtocol,
     Party,
+
+    // Constants.
+    HEADER_SIZE,
 };
 
 use super::listener::KeServerListener;
@@ -72,7 +87,7 @@ pub enum KeServerConnState {
     TlsHandshaking,
     /// The TLS handshake is done. It's opened for requests now.
     Opened,
-    /// The reponse is sent after getting a good request.
+    /// The response is sent after getting a good request.
     ResponseSent,
     /// The connection is closed.
     Closed,
@@ -95,6 +110,12 @@ pub struct KeServerConn {
     /// The status of the connection.
     state: KeServerConnState,
 
+    /// The state of NTS-KE.
+    ntske_state: ReceivedNtsKeRecordState,
+
+    /// The buffer of NTS-KE Stream.
+    ntske_buffer: Vec<u8>,
+
     /// Logger.
     logger: slog::Logger,
 }
@@ -112,14 +133,25 @@ impl KeServerConn {
         // Create a child logger for the connection.
         let logger = listener.logger().new(slog::o!("client" => listener.addr().to_string()));
 
+        let ntske_state = ReceivedNtsKeRecordState {
+            finished: false,
+            next_protocols: Vec::new(),
+            aead_scheme: Vec::new(),
+            cookies: Vec::new(),
+            next_server: None,
+            next_port: None,
+        };
+
         KeServerConn {
             // Create an `Arc` reference.
             server_state: server_state.clone(),
             tcp_stream,
             tls_session,
             token,
-            logger,
             state: KeServerConnState::Connected,
+            ntske_state,
+            ntske_buffer: Vec::new(),
+            logger,
         }
     }
 
@@ -191,6 +223,8 @@ impl KeServerConn {
 
         if !buf.is_empty() {
             debug!(self.logger, "plaintext read {},", buf.len());
+            self.ntske_buffer.append(&mut buf);
+            let mut reader = &self.ntske_buffer[..];
 
             // The plaintext is not empty. It means that the handshake is also done. We can change
             // the state now.
@@ -200,13 +234,64 @@ impl KeServerConn {
 
             let keys = gen_key(&self.tls_session).unwrap();
 
+            while !self.ntske_state.finished {
+                // need to read 4 bytes to get the header.
+                if reader.len() < HEADER_SIZE {
+                    info!(self.logger, "readable nts-ke stream is not enough to read header");
+                    self.ntske_buffer = Vec::from(reader);
+                    return;
+                }
+
+                // need to read the body_length to get the body.
+                let body_length = u16::from_be_bytes([reader[2], reader[3]]) as usize;
+                if reader.len() < HEADER_SIZE + body_length {
+                    info!(self.logger, "readable nts-ke stream is not enough to read body");
+                    self.ntske_buffer = Vec::from(reader);
+                    return;
+                }
+
+                // Reconstruct the whole record byte array to let the `records` module deserialize it.
+                let mut record_bytes = vec![0; HEADER_SIZE + body_length];
+                reader.read_exact(&mut record_bytes).unwrap();
+
+                match deserialize(Party::Server, record_bytes.as_slice()) {
+                    Ok(record) => {
+                        let status = process_record(record, &mut self.ntske_state);
+                        match status {
+                            Ok(_) => {}
+                            Err(err) => {
+                                error!(self.logger, "process nts-ke record: {}", err);
+                                self.shutdown();
+                                return;
+                            }
+                        }
+                    }
+                    Err(DeserializeError::UnknownNotCriticalRecord) => {
+                        // If it's not critical, just ignore the error.
+                        debug!(self.logger, "unknown record type");
+                    }
+                    Err(DeserializeError::UnknownCriticalRecord) => {
+                        // TODO: This should propertly handled by sending an Error record.
+                        debug!(self.logger, "error: unknown critical record");
+                        self.shutdown();
+                        return;
+                    }
+                    Err(DeserializeError::Parsing(error)) => {
+                        // TODO: This shouldn't be wrapped as a trait object.
+                        debug!(self.logger, "error: {}", error);
+                        self.shutdown();
+                        return;
+                    }
+                }
+            }
+
             // We have to make sure that the response is not sent yet.
             if self.state == KeServerConnState::Opened {
                 // TODO: Fix unwrap later.
                 self.tls_session
                     .write_all(&response(keys, &self.server_state.rotator,
                                          self.server_state.config.next_port)).unwrap();
-                // Mark that the reponse is sent.
+                // Mark that the response is sent.
                 self.state = KeServerConnState::ResponseSent;
             }
         }

@@ -1,6 +1,5 @@
 use slog::{debug, info};
 use std::error::Error;
-use std::fmt;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
@@ -12,28 +11,29 @@ use webpki_roots;
 
 use super::records;
 
-use self::ClientError::*;
 use crate::cookie::NTSKeys;
 use crate::nts_ke::records::{
-    deserialize,
-
     // Functions.
     serialize,
+    deserialize,
+    process_record,
+
     // Records.
     AeadAlgorithmRecord,
+    EndOfMessageRecord,
+
     // Errors.
     DeserializeError,
 
-    EndOfMessageRecord,
-    KeRecord,
-    // Traits.
-    KeRecordTrait,
     // Enums.
     KnownAeadAlgorithm,
     KnownNextProtocol,
     NextProtocolRecord,
-
+    NtsKeParseError,
     Party,
+
+    // Structs.
+    ReceivedNtsKeRecordState,
 
     // Constants.
     HEADER_SIZE,
@@ -48,17 +48,6 @@ const DEFAULT_SCHEME: u16 = 0;
 const TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Debug)]
-struct ClientState {
-    finished: bool,
-    cookies: Vec<Cookie>,
-    next_protocols: Vec<u16>,
-    aead_scheme: u16,
-    next_port: u16,
-    next_server: String,
-    keys: NTSKeys,
-}
-
-#[derive(Clone, Debug)]
 pub struct NtsKeResult {
     pub cookies: Vec<Cookie>,
     pub next_protocols: Vec<u16>,
@@ -67,69 +56,6 @@ pub struct NtsKeResult {
     pub next_port: u16,
     pub keys: NTSKeys,
     pub use_ipv4: Option<bool>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ClientError {
-    RecordAfterEnd,
-    ErrorRecord,
-    InvalidRecord,
-    NoIpv4AddrFound,
-    NoIpv6AddrFound,
-}
-
-impl std::error::Error for ClientError {
-    fn description(&self) -> &str {
-        match self {
-            _ => "Something is wrong",
-        }
-    }
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        None
-    }
-}
-
-impl std::fmt::Display for ClientError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Client Error")
-    }
-}
-
-/// Read https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-19#section-4
-fn process_record(
-    record: records::KeRecord,
-    state: &mut ClientState,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if state.finished {
-        return Err(Box::new(RecordAfterEnd));
-    }
-
-    match record {
-        KeRecord::EndOfMessage(_) => state.finished = true,
-        KeRecord::NextProtocol(record) => {
-            state.next_protocols = record
-                .protocols()
-                .iter()
-                .map(|protocol| protocol.as_protocol_id())
-                .collect();
-        }
-        KeRecord::Error(_) => return Err(Box::new(ErrorRecord)),
-        KeRecord::Warning(_) => return Ok(()),
-        KeRecord::AeadAlgorithm(record) => {
-            // TODO: Accessing at index zero can panic.
-            let algorithm = record.algorithms()[0];
-            state.aead_scheme = algorithm.as_algorithm_id();
-
-            if record.algorithms().len() != 1 {
-                return Err(Box::new(InvalidRecord));
-            }
-        }
-        KeRecord::NewCookie(record) => state.cookies.push(record.into_bytes()),
-        KeRecord::Server(record) => state.next_server = record.into_string(),
-        KeRecord::Port(record) => state.next_port = record.port(),
-    }
-
-    Ok(())
 }
 
 /// run_nts_client executes the nts client with the config in config file
@@ -171,13 +97,13 @@ pub fn run_nts_ke_client(
             // mandated to use ipv4
             addr = ip_addrs.find(|&x| x.is_ipv4());
             if addr == None {
-                return Err(Box::new(NoIpv4AddrFound));
+                return Err(Box::new(NtsKeParseError::NoIpv4AddrFound));
             }
         } else {
             // mandated to use ipv6
             addr = ip_addrs.find(|&x| x.is_ipv6());
             if addr == None {
-                return Err(Box::new(NoIpv6AddrFound));
+                return Err(Box::new(NtsKeParseError::NoIpv6AddrFound));
             }
         }
     } else {
@@ -202,17 +128,16 @@ pub fn run_nts_ke_client(
     debug!(logger, "Request transmitted");
     let keys = records::gen_key(tls_stream.sess).unwrap();
 
-    let mut state = ClientState {
+    let mut state = ReceivedNtsKeRecordState {
         finished: false,
-        cookies: Vec::new(),
         next_protocols: Vec::new(),
-        next_server: client_config.host.clone(),
-        next_port: DEFAULT_NTP_PORT,
-        keys: keys,
-        aead_scheme: DEFAULT_SCHEME,
+        aead_scheme: Vec::new(),
+        cookies: Vec::new(),
+        next_server: None,
+        next_port: None,
     };
 
-    while state.finished == false {
+    while !state.finished {
         let mut header: [u8; HEADER_SIZE] = [0; HEADER_SIZE];
 
         // We should use `read_exact` here because we always need to read 4 bytes to get the
@@ -272,13 +197,19 @@ pub fn run_nts_ke_client(
     debug!(logger, "saw the end of the response");
     stream.shutdown(Shutdown::Write)?;
 
+    let aead_scheme = if state.aead_scheme.is_empty() {
+        DEFAULT_SCHEME
+    } else {
+        state.aead_scheme[0]
+    };
+
     Ok(NtsKeResult {
-        aead_scheme: state.aead_scheme,
+        aead_scheme: aead_scheme,
         cookies: state.cookies,
         next_protocols: state.next_protocols,
-        next_server: state.next_server,
-        next_port: state.next_port,
-        keys: state.keys,
+        next_server: state.next_server.unwrap_or(client_config.host.clone()),
+        next_port: state.next_port.unwrap_or(DEFAULT_NTP_PORT),
+        keys: keys,
         use_ipv4: client_config.use_ipv4,
     })
 }

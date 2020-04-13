@@ -147,7 +147,7 @@ pub fn deserialize(sender: Party, bytes: &[u8]) -> Result<KeRecord, DeserializeE
 }
 
 /// gen_key computes the client and server keys using exporters.
-/// https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-18#section-6
+/// https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-28#section-4.3
 pub fn gen_key<T: rustls::Session>(session: &T) -> Result<NTSKeys, TLSError> {
     let mut keys: NTSKeys = NTSKeys {
         c2s: [0; 32],
@@ -157,7 +157,7 @@ pub fn gen_key<T: rustls::Session>(session: &T) -> Result<NTSKeys, TLSError> {
     let s2c_con = [0, 0, 0, 15, 01];
     let context_c2s = Some(&c2s_con[..]);
     let context_s2c = Some(&s2c_con[..]);
-    let label = "EXPORTER-network-time-security/1".as_bytes();
+    let label = "EXPORTER-network-time-security".as_bytes();
     session.export_keying_material(&mut keys.c2s, label, context_c2s)?;
     session.export_keying_material(&mut keys.s2c, label, context_s2c)?;
 

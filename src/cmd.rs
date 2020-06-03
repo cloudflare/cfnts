@@ -17,7 +17,7 @@ fn create_clap_client_subcommand<'a, 'b>() -> App<'a, 'b> {
 
         // The rest will be passed as unrequired command-line options.
         Arg::with_name("port").long("port").short("p").takes_value(true).required(false)
-            .help("Specifies NTS server's port. The default port number is 1234."),
+            .help("Specifies NTS server's port. The default port number is 4460."),
         Arg::with_name("cert").long("cert").short("c").takes_value(true).required(false)
             .help("Specifies a path to the trusted certificate in PEM format."),
         Arg::with_name("ipv4").long("ipv4").short("4").conflicts_with("ipv6")

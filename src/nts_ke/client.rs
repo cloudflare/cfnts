@@ -43,7 +43,7 @@ use crate::sub_command::client::ClientConfig;
 type Cookie = Vec<u8>;
 
 const DEFAULT_NTP_PORT: u16 = 123;
-const DEFAULT_KE_PORT: u16 = 1234;
+const DEFAULT_KE_PORT: u16 = 4460;
 const DEFAULT_SCHEME: u16 = 0;
 const TIMEOUT: Duration = Duration::from_secs(15);
 

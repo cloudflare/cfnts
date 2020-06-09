@@ -1,5 +1,5 @@
 addr:
-  - "[::]:1234"
+  - "[::]:4460"
 tls_key_file: tests/tls-pkcs8.pem
 tls_cert_file: tests/chain.pem # Expect PEM.
 cookie_key_file: tests/cookie.key # TODO: store and read as pem files, or read bytes directly from file?

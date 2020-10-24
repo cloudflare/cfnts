@@ -388,7 +388,9 @@ fn response(
             }
         }
     } else {
-        Ok(serialize_header(resp_header))
+        let mut out = Vec::with_capacity(48);
+        serialize_header(resp_header, &mut out);
+        Ok(out)
     }
 }
 

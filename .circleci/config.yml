@@ -2,7 +2,7 @@ version: 2
 jobs:
   build:
     docker:
-    - image: circleci/rust:1.36.0-stretch
+    - image: cimg/rust:1.69.0
     steps:
     - checkout
     - run:
@@ -17,7 +17,7 @@ jobs:
     - run:
         name: Installing Docker Compose
         command: |
-            curl -L https://github.com/docker/compose/releases/download/1.19.0/docker-compose-`uname -s`-`uname -m` > ~/docker-compose
+            curl -L https://github.com/docker/compose/releases/download/v2.18.1/docker-compose-`uname -s`-`uname -m` > ~/docker-compose
             chmod +x ~/docker-compose
             sudo mv ~/docker-compose /usr/local/bin/docker-compose
     - setup_remote_docker

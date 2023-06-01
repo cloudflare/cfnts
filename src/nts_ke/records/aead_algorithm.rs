@@ -72,8 +72,10 @@ impl KeRecordTrait for AeadAlgorithmRecord {
         // The body length must be even because each algorithm code take 2 bytes, so it's not
         // reasonable for the length to be odd.
         if bytes.len() % 2 != 0 {
-            return Err(String::from("the body length of AEAD Algorithm Negotiation
-                                     must be even."));
+            return Err(String::from(
+                "the body length of AEAD Algorithm Negotiation
+                                     must be even.",
+            ));
         }
 
         let mut algorithms = Vec::new();

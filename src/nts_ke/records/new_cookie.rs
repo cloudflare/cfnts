@@ -27,8 +27,7 @@ impl KeRecordTrait for NewCookieRecord {
     }
 
     fn len(&self) -> u16 {
-        u16::try_from(self.0.len())
-            .expect("the cookie is too large to fit in the record")
+        u16::try_from(self.0.len()).expect("the cookie is too large to fit in the record")
     }
 
     fn into_bytes(self) -> Vec<u8> {

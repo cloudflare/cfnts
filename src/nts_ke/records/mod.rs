@@ -4,28 +4,28 @@
 
 //! NTS-KE record representation.
 
-mod end_of_message;
-mod next_protocol;
-mod error;
-mod warning;
 mod aead_algorithm;
+mod end_of_message;
+mod error;
 mod new_cookie;
-mod server;
+mod next_protocol;
 mod port;
+mod server;
+mod warning;
 
 // We pub use everything in the submodules. You can limit the scope of usage by putting it the
 // submodule itself.
-pub use self::end_of_message::*;
-pub use self::next_protocol::*;
-pub use self::error::*;
-pub use self::warning::*;
 pub use self::aead_algorithm::*;
+pub use self::end_of_message::*;
+pub use self::error::*;
 pub use self::new_cookie::*;
-pub use self::server::*;
+pub use self::next_protocol::*;
 pub use self::port::*;
+pub use self::server::*;
+pub use self::warning::*;
 
-use std::fmt;
 use rustls::TLSError;
+use std::fmt;
 
 use crate::cookie::NTSKeys;
 
@@ -153,8 +153,8 @@ pub fn gen_key<T: rustls::Session>(session: &T) -> Result<NTSKeys, TLSError> {
         c2s: [0; 32],
         s2c: [0; 32],
     };
-    let c2s_con = [0, 0, 0, 15, 00];
-    let s2c_con = [0, 0, 0, 15, 01];
+    let c2s_con = [0, 0, 0, 15, 0];
+    let s2c_con = [0, 0, 0, 15, 1];
     let context_c2s = Some(&c2s_con[..]);
     let context_s2c = Some(&s2c_con[..]);
     let label = "EXPORTER-network-time-security".as_bytes();
@@ -191,7 +191,14 @@ pub enum NtsKeParseError {
 impl std::error::Error for NtsKeParseError {
     fn description(&self) -> &str {
         match self {
-            _ => "Something is wrong",
+            Self::RecordAfterEnd => "Received record after connection finished",
+            Self::ErrorRecord => "Received NTS error record",
+            Self::NoIpv4AddrFound => {
+                "Connection to server failed: IPv4 address could not be resolved"
+            }
+            Self::NoIpv6AddrFound => {
+                "Connection to server failed: IPv6 address could not be resolved"
+            }
         }
     }
     fn cause(&self) -> Option<&dyn std::error::Error> {
@@ -205,7 +212,7 @@ impl fmt::Display for NtsKeParseError {
     }
 }
 
-/// Read https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-19#section-4
+/// Read https://datatracker.ietf.org/doc/html/rfc8915#section-4
 pub fn process_record(
     record: KeRecord,
     state: &mut ReceivedNtsKeRecordState,

@@ -70,8 +70,10 @@ impl KeRecordTrait for NextProtocolRecord {
         // The body length must be even because each protocol code take 2 bytes, so it's not
         // reasonable for the length to be odd.
         if bytes.len() % 2 != 0 {
-            return Err(String::from("the body length of Next Protocol Negotiation
-                                     must be even."));
+            return Err(String::from(
+                "the body length of Next Protocol Negotiation
+                                     must be even.",
+            ));
         }
 
         let mut protocols = Vec::new();

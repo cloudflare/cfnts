@@ -1,8 +1,4 @@
-FROM debian:stretch
+FROM debian:bookworm
 
 RUN apt-get update && \
-    apt-get -y install memcached python-pip && \
-    pip install python-memcached
-
-COPY scripts/ scripts/
-CMD ["./scripts/run_memcached.sh"]
+    apt-get -y install memcached python3-memcache

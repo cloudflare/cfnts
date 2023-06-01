@@ -246,7 +246,7 @@ fn parse_extensions(buff: &[u8]) -> Result<Vec<NtpExtension>, std::io::Error> {
             return Err(Error::new(ErrorKind::InvalidInput, "extension too short"));
         }
         let mut contents: Vec<u8> = vec![0; (ext_len - 4) as usize];
-        reader.read(&mut contents)?;
+        reader.read_exact(&mut contents)?;
         retval.push(NtpExtension {
             ext_type: type_from_wire(ext_type),
             contents: contents,
@@ -324,7 +324,7 @@ pub fn parse_nts_packet<T: Aead>(
         match type_from_wire(ext_type) {
             NTSAuthenticator => {
                 let mut auth_ext_contents = vec![0; ext_len];
-                reader.read(&mut auth_ext_contents)?;
+                reader.read_exact(&mut auth_ext_contents)?;
                 let oldpos = (reader.position() - 4 - (ext_len as u64)) as usize;
                 let enc_ext_data =
                     parse_decrypt_auth_ext::<T>(&buff[0..oldpos], &auth_ext_contents, decryptor)?;
@@ -337,7 +337,7 @@ pub fn parse_nts_packet<T: Aead>(
             }
             _ => {
                 let mut contents: Vec<u8> = vec![0; ext_len];
-                reader.read(&mut contents)?;
+                reader.read_exact(&mut contents)?;
                 auth_exts.push(NtpExtension {
                     ext_type: type_from_wire(ext_type),
                     contents: contents,

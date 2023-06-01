@@ -93,6 +93,8 @@ struct ServerState {
     taken: SystemTime,
 }
 
+type TheCmsgSpace = CmsgSpace<(TimeVal, CmsgSpace<(in_pktinfo, CmsgSpace<in6_pktinfo>)>)>;
+
 /// run_server runs the ntp server on the given socket.
 /// The caller has to set up the socket options correctly
 fn run_server(
@@ -119,8 +121,7 @@ fn run_server(
         // Receive and respond to packets
         let mut buf = [0; BUF_SIZE];
         let flags = MsgFlags::empty();
-        let mut cmsgspace: CmsgSpace<(TimeVal, CmsgSpace<(in_pktinfo, CmsgSpace<in6_pktinfo>)>)> =
-            CmsgSpace::new();
+        let mut cmsgspace = TheCmsgSpace::new();
         let iov = [IoVec::from_mut_slice(&mut buf)];
         let r = recvmsg(sockfd, &iov, Some(&mut cmsgspace), flags);
         if let Err(_err) = r {
@@ -128,7 +129,7 @@ fn run_server(
             continue;
         }
         let r = r.unwrap(); // this is safe because of previous if
-        if let None = r.address {
+        if r.address.is_none() {
             // No return address => we can't do anything
             continue;
         }
@@ -228,7 +229,7 @@ pub fn start_ntp_server(config: NtpServerConfig) -> Result<(), Box<dyn std::erro
     };
 
     let servstate = Arc::new(RwLock::new(servstate_struct));
-    match config.upstream_addr.clone() {
+    match config.upstream_addr {
         Some(upstream_addr) => {
             info!(logger, "connecting to upstream");
             let servstate = servstate.clone();
@@ -242,8 +243,8 @@ pub fn start_ntp_server(config: NtpServerConfig) -> Result<(), Box<dyn std::erro
         None => {
             let mut state_guard = servstate.write().unwrap();
             info!(logger, "setting stratum to 1");
-            (*state_guard).leap = NoLeap;
-            (*state_guard).stratum = 1;
+            state_guard.leap = NoLeap;
+            state_guard.stratum = 1;
         }
     }
 
@@ -289,8 +290,7 @@ fn fix_dispersion(disp: u32, now: SystemTime, taken: SystemTime) -> u32 {
             let curdispf = dispf + (secs.as_secs() as f64) * PHI;
             let curdisp_secs = curdispf.floor() as u32;
             let curdisp_frac = (curdispf * 65336.0).floor() as u32;
-            let curdisp = (curdisp_secs << 16) + curdisp_frac;
-            curdisp
+            (curdisp_secs << 16) + curdisp_frac
         }
         Err(_) => disp,
     }
@@ -328,8 +328,8 @@ fn create_header(
         reference_id: servstate.refid,
         reference_timestamp: servstate.refstamp,
         origin_timestamp: query_packet.header.transmit_timestamp,
-        receive_timestamp: receive_timestamp,
-        transmit_timestamp: transmit_timestamp,
+        receive_timestamp,
+        transmit_timestamp,
     }
 }
 
@@ -417,7 +417,7 @@ fn nts_response(
     cookie_keys: Arc<RwLock<KeyRotator>>,
 ) -> NtsPacket {
     let mut resp_packet = NtsPacket {
-        header: header,
+        header,
         auth_exts: vec![],
         auth_enc_exts: vec![],
     };

@@ -25,7 +25,7 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
             });
         }
     }
-    return metrics;
+    metrics
 }
 
 /// Configuration for running an NTP server.
@@ -162,15 +162,11 @@ impl NtpServerConfig {
             Ok(addr) => Some(addr),
         };
 
-        let upstream_sock_addr = if upstream_addr.is_some() && upstream_port.is_some() {
-            let sock_addr = SocketAddr::from((
-                // No problem to unwrap here because `upstream_addr` is Some(_).
-                IpAddr::from_str(&upstream_addr.unwrap()).wrap_err()?,
-
-                // No problem to unwrap here because `upstream_port` is Some(_).
-                upstream_port.unwrap(),
-            ));
-            Some(sock_addr)
+        let upstream_sock_addr = if let (Some(upstream_addr), Some(upstream_port)) = (upstream_addr, upstream_port) {
+            Some(SocketAddr::from((
+                IpAddr::from_str(&upstream_addr).wrap_err()?,
+                upstream_port,
+            )))
         } else {
             None
         };

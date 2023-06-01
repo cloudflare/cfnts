@@ -153,8 +153,8 @@ pub fn gen_key<T: rustls::Session>(session: &T) -> Result<NTSKeys, TLSError> {
         c2s: [0; 32],
         s2c: [0; 32],
     };
-    let c2s_con = [0, 0, 0, 15, 00];
-    let s2c_con = [0, 0, 0, 15, 01];
+    let c2s_con = [0, 0, 0, 15, 0];
+    let s2c_con = [0, 0, 0, 15, 1];
     let context_c2s = Some(&c2s_con[..]);
     let context_s2c = Some(&s2c_con[..]);
     let label = "EXPORTER-network-time-security".as_bytes();
@@ -190,9 +190,7 @@ pub enum NtsKeParseError {
 
 impl std::error::Error for NtsKeParseError {
     fn description(&self) -> &str {
-        match self {
-            _ => "Something is wrong",
-        }
+        "Something is wrong"
     }
     fn cause(&self) -> Option<&dyn std::error::Error> {
         None

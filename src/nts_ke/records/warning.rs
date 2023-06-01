@@ -55,7 +55,7 @@ impl KeRecordTrait for WarningRecord {
             return Ok(WarningRecord(kind));
         }
 
-        return Err(String::from("unknown warning code"))
+        Err(String::from("unknown warning code"))
     }
 }
 

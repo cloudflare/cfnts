@@ -14,7 +14,7 @@ pub struct MetricsConfig {
     pub addr: String,
 }
 
-const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 lazy_static! {
     static ref VERSION_INFO: prometheus::IntGauge = register_int_gauge!(opts!(
@@ -39,7 +39,7 @@ fn wait_for_req_or_eof(dest: &net::TcpStream, logger: slog::Logger) -> Result<()
                 logger,
                 "failure to read request {:?}, unable to serve metrics", e
             );
-            dest.shutdown(net::Shutdown::Both);
+            let _ = dest.shutdown(net::Shutdown::Both);
             return Err(e);
         }
         if let Ok(0) = res {
@@ -65,18 +65,13 @@ fn scrape_result() -> String {
 
 fn serve_metrics(mut dest: net::TcpStream, logger: slog::Logger) -> Result<(), std::io::Error> {
     wait_for_req_or_eof(&dest, logger.clone())?;
-    if let Err(e) = dest.write(&scrape_result().as_bytes()) {
+    if let Err(e) = dest.write(scrape_result().as_bytes()) {
         error!(
             logger,
             "write to TcpStream failed with error: {:?}, unable to serve metrics", e
         );
     }
-    if let Err(e) = dest.shutdown(net::Shutdown::Write) {
-        error!(
-            logger,
-            "TcpStream shutdown failed with error: {:?}, unable to serve metrics", e
-        );
-    }
+    let _ = dest.shutdown(net::Shutdown::Write);
     Ok(())
 }
 
@@ -89,11 +84,11 @@ pub fn run_metrics(conf: MetricsConfig, logger: &slog::Logger) -> Result<(), std
             Ok(conn) => {
                 let log_metrics = logger.new(slog::o!("component"=>"serve_metrics"));
                 thread::spawn(move || {
-                    serve_metrics(conn, log_metrics);
+                    let _ = serve_metrics(conn, log_metrics);
                 });
             }
             Err(err) => return Err(err),
         }
     }
-    return Err(io::Error::new(io::ErrorKind::Other, "unreachable"));
+    Err(io::Error::new(io::ErrorKind::Other, "unreachable"))
 }

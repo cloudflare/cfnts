@@ -27,7 +27,7 @@ use sloggers::Build;
 use std::process;
 
 /// Create a logger to be used throughout cfnts.
-fn create_logger<'a>(matches: &clap::ArgMatches<'a>) -> slog::Logger {
+fn create_logger(matches: &clap::ArgMatches<'_>) -> slog::Logger {
     let mut builder = TerminalLoggerBuilder::new();
 
     // Default severity level is info.

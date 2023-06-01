@@ -40,9 +40,7 @@ pub enum NtpClientError {
 
 impl std::error::Error for NtpClientError {
     fn description(&self) -> &str {
-        match self {
-            _ => "Connection to server failed because address could not be resolved",
-        }
+        "Connection to server failed because address could not be resolved"
     }
     fn cause(&self) -> Option<&dyn std::error::Error> {
         None
@@ -83,14 +81,14 @@ pub fn run_nts_ntp_client(
         if use_ipv4 {
             // mandated to use ipv4
             addr = ip_addrs.find(|&x| x.is_ipv4());
-            if addr == None {
+            if addr.is_none() {
                 return Err(Box::new(NoIpv4AddrFound));
             }
             socket = UdpSocket::bind("0.0.0.0:0");
         } else {
             // mandated to use ipv6
             addr = ip_addrs.find(|&x| x.is_ipv6());
-            if addr == None {
+            if addr.is_none() {
                 return Err(Box::new(NoIpv6AddrFound));
             }
             socket = UdpSocket::bind("[::]:0");
@@ -128,7 +126,7 @@ pub fn run_nts_ntp_client(
     };
     let mut unique_id: Vec<u8> = vec![0; 32];
     rand::thread_rng().fill(&mut unique_id[..]);
-    let exts = vec![
+    let auth_exts = vec![
         NtpExtension {
             ext_type: UniqueIdentifier,
             contents: unique_id.clone(),
@@ -139,8 +137,8 @@ pub fn run_nts_ntp_client(
         },
     ];
     let packet = NtsPacket {
-        header: header,
-        auth_exts: exts,
+        header,
+        auth_exts,
         auth_enc_exts: vec![],
     };
     socket.connect(addr.unwrap())?;

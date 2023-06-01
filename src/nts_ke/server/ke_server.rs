@@ -141,7 +141,7 @@ impl KeServer {
             // Instantiate a listener.
             // If there is an error here just return an error immediately so that we don't have to
             // start a thread for other address.
-            let listener = KeServerListener::bind(addr.clone(), &self)?;
+            let listener = KeServerListener::bind(*addr, self)?;
 
             // It needs to be referenced by this thread and the new thread.
             let atomic_listener = Arc::new(RwLock::new(listener));

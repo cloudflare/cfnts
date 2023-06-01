@@ -28,7 +28,7 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
             });
         }
     }
-    return metrics;
+    metrics
 }
 
 /// Configuration for running an NTS-KE server.

@@ -45,7 +45,7 @@ use crate::nts_ke::records::{
 };
 
 use super::listener::KeServerListener;
-use super::server::KeServerState;
+use super::ke_server::KeServerState;
 
 // response uses the configuration and the keys and computes the response
 // sent to the client.
@@ -301,7 +301,6 @@ impl KeServerConn {
         if let Err(error) = self.tls_session.write_tls(&mut self.tcp_stream) {
             error!(self.logger, "write failed: {}", error);
             self.shutdown();
-            return;
         }
     }
 

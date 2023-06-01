@@ -5,7 +5,7 @@
 //! NTP server implementation.
 
 mod config;
-mod server;
+mod ntp_server;
 
-pub use self::server::start_ntp_server;
+pub use self::ntp_server::start_ntp_server;
 pub use self::config::NtpServerConfig;

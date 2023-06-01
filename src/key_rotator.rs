@@ -57,7 +57,7 @@ impl KeyId {
     }
 
     /// Return the memory representation of this `KeyId` as a byte array in big endian.
-    pub fn to_be_bytes(&self) -> [u8; 4] {
+    pub fn to_be_bytes(self) -> [u8; 4] {
         self.0.to_be_bytes()
     }
 }
@@ -266,11 +266,11 @@ impl KeyRotator {
 }
 
 pub fn periodic_rotate(rotor: Arc<RwLock<KeyRotator>>) {
-    let mut rotor = rotor.clone();
+    let mut rotor = rotor;
     thread::spawn(move || loop {
         inner(&mut rotor);
         let restlen = read_sleep(&rotor);
-        thread::sleep(Duration::from_secs(restlen as u64));
+        thread::sleep(Duration::from_secs(restlen));
     });
 }
 

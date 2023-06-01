@@ -14,7 +14,7 @@ pub struct MetricsConfig {
     pub addr: String,
 }
 
-const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 lazy_static! {
     static ref VERSION_INFO: prometheus::IntGauge = register_int_gauge!(opts!(
@@ -35,11 +35,7 @@ fn wait_for_req_or_eof(dest: &net::TcpStream, logger: slog::Logger) -> Result<()
         req_line.clear();
         let res = reader.read_line(&mut req_line);
         if let Err(e) = res {
-            error!(
-                logger,
-                "failure to read request {:?}, unable to serve metrics", e
-            );
-            dest.shutdown(net::Shutdown::Both);
+            error!(logger, "failure to read request {:?}", e);
             return Err(e);
         }
         if let Ok(0) = res {
@@ -63,21 +59,26 @@ fn scrape_result() -> String {
         + &String::from_utf8(buffer).unwrap()
 }
 
-fn serve_metrics(mut dest: net::TcpStream, logger: slog::Logger) -> Result<(), std::io::Error> {
-    wait_for_req_or_eof(&dest, logger.clone())?;
-    if let Err(e) = dest.write(&scrape_result().as_bytes()) {
+fn serve_metrics(mut dest: net::TcpStream, logger: slog::Logger) {
+    if let Err(e) = wait_for_req_or_eof(&dest, logger.clone()) {
+        error!(
+            logger,
+            "error in wait_for_req_or_eof: {:?}, unable to serve metrics", e
+        );
+        if let Err(e) = dest.shutdown(net::Shutdown::Both) {
+            error!(logger, "shutting down TcpStream failed with error: {:?}", e);
+        }
+        return;
+    }
+    if let Err(e) = dest.write(scrape_result().as_bytes()) {
         error!(
             logger,
             "write to TcpStream failed with error: {:?}, unable to serve metrics", e
         );
     }
     if let Err(e) = dest.shutdown(net::Shutdown::Write) {
-        error!(
-            logger,
-            "TcpStream shutdown failed with error: {:?}, unable to serve metrics", e
-        );
+        error!(logger, "failure to shut down {:?}", e);
     }
-    Ok(())
 }
 
 /// Runs the metric server on the address and port set in config
@@ -95,5 +96,5 @@ pub fn run_metrics(conf: MetricsConfig, logger: &slog::Logger) -> Result<(), std
             Err(err) => return Err(err),
         }
     }
-    return Err(io::Error::new(io::ErrorKind::Other, "unreachable"));
+    Err(io::Error::new(io::ErrorKind::Other, "unreachable"))
 }

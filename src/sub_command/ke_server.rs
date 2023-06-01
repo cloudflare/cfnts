@@ -6,14 +6,14 @@
 
 use std::process;
 
-use crate::nts_ke::server::{KeServerConfig, KeServer};
+use crate::nts_ke::server::{KeServer, KeServerConfig};
 
 /// Get a configuration file path for `ke-server`.
 ///
 /// If the path is not specified, the system-wide configuration file (/etc/cfnts/ke-server.config)
 /// will be used instead.
 ///
-fn resolve_config_filename<'a>(matches: &clap::ArgMatches<'a>) -> String {
+fn resolve_config_filename(matches: &clap::ArgMatches<'_>) -> String {
     match matches.value_of("configfile") {
         // If the config file is specified in the arguments, just use it.
         Some(filename) => String::from(filename),
@@ -23,19 +23,19 @@ fn resolve_config_filename<'a>(matches: &clap::ArgMatches<'a>) -> String {
 }
 
 /// The entry point of `ke-server`.
-pub fn run<'a>(matches: &clap::ArgMatches<'a>) {
+pub fn run(matches: &clap::ArgMatches<'_>) {
     // This should return the clone of `logger` in the main function.
     let global_logger = slog_scope::logger();
 
     // Get the config file path.
-    let filename = resolve_config_filename(&matches);
+    let filename = resolve_config_filename(matches);
     let mut config = match KeServerConfig::parse(&filename) {
         Ok(val) => val,
         // If there is an error, display it.
         Err(err) => {
             eprintln!("{}", err);
             process::exit(1);
-        },
+        }
     };
 
     let logger = global_logger.new(slog::o!("component" => "nts_ke"));

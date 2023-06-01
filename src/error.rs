@@ -19,15 +19,14 @@ pub trait WrapError<T: Error> {
 // The reason that we have a lifetime bound 'static is that we want T to either contain no lifetime
 // parameter or contain only the 'static lifetime parameter.
 impl<S, T> WrapError<config::ConfigError> for Result<S, T>
-    where T : 'static + Error + Send + Sync
+where
+    T: 'static + Error + Send + Sync,
 {
     /// Don't change the returned type, in case there is no error.
     type Item = S;
 
     fn wrap_err(self) -> Result<S, config::ConfigError> {
-        self.map_err(|error| {
-            config::ConfigError::Foreign(Box::new(error))
-        })
+        self.map_err(|error| config::ConfigError::Foreign(Box::new(error)))
     }
 }
 
@@ -35,14 +34,13 @@ impl<S, T> WrapError<config::ConfigError> for Result<S, T>
 // The reason that we have a lifetime bound 'static is that we want T to either contain no lifetime
 // parameter or contain only the 'static lifetime parameter.
 impl<S, T> WrapError<std::io::Error> for Result<S, T>
-    where T : 'static + Error + Send + Sync
+where
+    T: 'static + Error + Send + Sync,
 {
     /// Don't change the returned type, in case there is no error.
     type Item = S;
 
     fn wrap_err(self) -> Result<S, std::io::Error> {
-        self.map_err(|error| {
-            std::io::Error::new(std::io::ErrorKind::Other, error)
-        })
+        self.map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error))
     }
 }

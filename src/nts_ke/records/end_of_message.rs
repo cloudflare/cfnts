@@ -27,8 +27,10 @@ impl KeRecordTrait for EndOfMessageRecord {
     }
 
     fn from_bytes(_: Party, bytes: &[u8]) -> Result<Self, String> {
-        if bytes.len() != 0 {
-            Err(String::from("the body length of End Of Message must be zero."))
+        if !bytes.is_empty() {
+            Err(String::from(
+                "the body length of End Of Message must be zero.",
+            ))
         } else {
             Ok(EndOfMessageRecord)
         }

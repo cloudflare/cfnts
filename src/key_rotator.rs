@@ -16,9 +16,9 @@ use ring::hmac;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time::{Duration, UNIX_EPOCH};
 #[cfg(not(test))]
 use std::time::SystemTime;
+use std::time::{Duration, UNIX_EPOCH};
 
 use crate::cookie::CookieKey;
 
@@ -57,7 +57,7 @@ impl KeyId {
     }
 
     /// Return the memory representation of this `KeyId` as a byte array in big endian.
-    pub fn to_be_bytes(&self) -> [u8; 4] {
+    pub fn to_be_bytes(self) -> [u8; 4] {
         self.0.to_be_bytes()
     }
 }
@@ -92,7 +92,6 @@ pub struct KeyRotator {
 
     // The number of forward and backward periods are `u64` because the timestamp is `u64` and the
     // duration can be as small as 1.
-
     /// The number of future periods that the rotator must cache their values from the
     /// Memcached server.
     number_of_forward_periods: u64,
@@ -188,7 +187,8 @@ impl KeyRotator {
         // Side-effect. It's not related to the operation.
         ROTATION_COUNTER.inc();
 
-        let duration = SystemTime::now().duration_since(UNIX_EPOCH)
+        let duration = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
             .expect("The system time must be after the UNIX Epoch time.");
 
         // The number of seconds since the Epoch time.
@@ -226,7 +226,7 @@ impl KeyRotator {
                 None => {
                     FAILURE_COUNTER.inc();
                     return Err(RotateError::KeyIdNotFound(key_id));
-                },
+                }
             }
         }
 
@@ -266,11 +266,11 @@ impl KeyRotator {
 }
 
 pub fn periodic_rotate(rotor: Arc<RwLock<KeyRotator>>) {
-    let mut rotor = rotor.clone();
+    let mut rotor = rotor;
     thread::spawn(move || loop {
         inner(&mut rotor);
         let restlen = read_sleep(&rotor);
-        thread::sleep(Duration::from_secs(restlen as u64));
+        thread::sleep(Duration::from_secs(restlen));
     });
 }
 
@@ -286,9 +286,12 @@ fn read_sleep(rotor: &Arc<RwLock<KeyRotator>>) -> u64 {
 // Tests
 // ------------------------------------------------------------------------
 
-#[cfg(test)] use ::memcache::MemcacheError;
-#[cfg(test)] use test::memcache;
-#[cfg(test)] use test::SystemTime;
+#[cfg(test)]
+use ::memcache::MemcacheError;
+#[cfg(test)]
+use test::memcache;
+#[cfg(test)]
+use test::SystemTime;
 
 #[cfg(test)]
 mod test {
@@ -296,8 +299,8 @@ mod test {
 
     use ::memcache::MemcacheError;
     use lazy_static::lazy_static;
-    use sloggers::Build;
     use sloggers::null::NullLoggerBuilder;
+    use sloggers::Build;
     use std::sync::Mutex;
     use std::time::Duration;
 

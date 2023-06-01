@@ -58,6 +58,6 @@ impl KeRecordTrait for ErrorRecord {
             return Ok(ErrorRecord(kind));
         }
 
-        return Err(String::from("unknown error code"));
+        Err(String::from("unknown error code"))
     }
 }

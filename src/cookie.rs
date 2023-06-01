@@ -57,19 +57,15 @@ pub fn make_cookie(keys: NTSKeys, master_key: &[u8], key_id: KeyId) -> Vec<u8> {
     let mut nonce = [0; 16];
     rand::thread_rng().fill(&mut nonce);
     let mut plaintext = [0; 64];
-    for i in 0..32 {
-        plaintext[i] = keys.c2s[i];
-    }
-    for i in 0..32 {
-        plaintext[32 + i] = keys.s2c[i];
-    }
-    let mut aead = aead::Aes128SivAead::new(&master_key);
+    plaintext[..32].copy_from_slice(&keys.c2s[..32]);
+    plaintext[32..64].copy_from_slice(&keys.s2c[..32]);
+    let mut aead = aead::Aes128SivAead::new(master_key);
     let mut ciphertext = aead.seal(&nonce, &[], &plaintext);
     let mut out = Vec::new();
     out.extend(&key_id.to_be_bytes());
     out.extend(&nonce);
     out.append(&mut ciphertext);
-    return out;
+    out
 }
 
 pub fn get_keyid(cookie: &[u8]) -> Option<KeyId> {
@@ -82,17 +78,15 @@ pub fn get_keyid(cookie: &[u8]) -> Option<KeyId> {
 
 fn unpack(pt: Vec<u8>) -> Option<NTSKeys> {
     if pt.len() != 64 {
-        return None;
+        None
     } else {
         let mut key = NTSKeys {
             c2s: [0; 32],
             s2c: [0; 32],
         };
-        for i in 0..32 {
-            key.c2s[i] = pt[i];
-            key.s2c[i] = pt[32 + i];
-        }
-        return Some(key);
+        key.c2s[..32].copy_from_slice(&pt[..32]);
+        key.s2c[..32].copy_from_slice(&pt[32..64]);
+        Some(key)
     }
 }
 
@@ -101,7 +95,7 @@ pub fn eat_cookie(cookie: &[u8], key: &[u8]) -> Option<NTSKeys> {
         return None;
     }
     let ciphertext = &cookie[4..];
-    let mut aead = aead::Aes128SivAead::new(&key);
+    let mut aead = aead::Aes128SivAead::new(key);
     let answer = aead.open(&ciphertext[0..16], &[], &ciphertext[16..]);
     match answer {
         Err(_) => None,
@@ -130,26 +124,12 @@ mod tests {
         let master_key = [0x07; 32];
         let key_id = KeyId::from_be_bytes([0x03; 4]);
         let mut cookie = make_cookie(test, &master_key, key_id);
-        let ret = get_keyid(&cookie);
-
         assert_eq!(cookie.len(), COOKIE_SIZE);
-        match ret {
-            None => assert!(false),
-            Some(id) => assert_eq!(id, key_id),
-        }
-
-        let ret2 = eat_cookie(&cookie, &master_key);
-        match ret2 {
-            None => assert!(false),
-            Some(new_key) => check_eq(new_key, test),
-        }
+        assert_eq!(get_keyid(&cookie).unwrap(), key_id);
+        check_eq(eat_cookie(&cookie, &master_key).unwrap(), test);
 
         cookie[9] = 0xff;
         cookie[10] = 0xff;
-        let ret3 = eat_cookie(&cookie, &master_key);
-        match ret3 {
-            None => (),
-            Some(_) => assert!(false),
-        }
+        assert!(eat_cookie(&cookie, &master_key).is_none());
     }
 }

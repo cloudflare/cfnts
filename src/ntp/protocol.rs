@@ -166,7 +166,7 @@ pub fn parse_packet_header(packet: &[u8]) -> Result<NtpPacketHeader, std::io::Er
         let root_delay = buff.read_u32::<BigEndian>()?;
         let root_dispersion = buff.read_u32::<BigEndian>()?;
         let reference_id = buff.read_u32::<BigEndian>()?;
-        let ref_timestamp = buff.read_u64::<BigEndian>()?;
+        let reference_timestamp = buff.read_u64::<BigEndian>()?;
         let origin_timestamp = buff.read_u64::<BigEndian>()?;
         let receive_timestamp = buff.read_u64::<BigEndian>()?;
         let transmit_timestamp = buff.read_u64::<BigEndian>()?;
@@ -174,16 +174,16 @@ pub fn parse_packet_header(packet: &[u8]) -> Result<NtpPacketHeader, std::io::Er
             leap_indicator: parse_leap_indicator(first),
             version: parse_version(first),
             mode: parse_mode(first),
-            stratum: stratum,
-            poll: poll,
-            precision: precision,
-            root_delay: root_delay,
-            root_dispersion: root_dispersion,
-            reference_id: reference_id,
-            reference_timestamp: ref_timestamp,
-            origin_timestamp: origin_timestamp,
-            receive_timestamp: receive_timestamp,
-            transmit_timestamp: transmit_timestamp,
+            stratum,
+            poll,
+            precision,
+            root_delay,
+            root_dispersion,
+            reference_id,
+            reference_timestamp,
+            origin_timestamp,
+            receive_timestamp,
+            transmit_timestamp,
         })
     }
 }
@@ -221,11 +221,8 @@ pub fn serialize_header(head: NtpPacketHeader) -> Vec<u8> {
 /// parse_ntp_packet parses an NTP packet
 pub fn parse_ntp_packet(buff: &[u8]) -> Result<NtpPacket, std::io::Error> {
     let header = parse_packet_header(buff)?;
-    let extensions = parse_extensions(&buff[48..])?;
-    Ok(NtpPacket {
-        header: header,
-        exts: extensions,
-    })
+    let exts = parse_extensions(&buff[48..])?;
+    Ok(NtpPacket { header, exts })
 }
 
 /// Properly parsing NTP extensions in accordance with RFC 7822 is not necessary
@@ -249,7 +246,7 @@ fn parse_extensions(buff: &[u8]) -> Result<Vec<NtpExtension>, std::io::Error> {
         reader.read_exact(&mut contents)?;
         retval.push(NtpExtension {
             ext_type: type_from_wire(ext_type),
-            contents: contents,
+            contents,
         })
     }
     Ok(retval)
@@ -283,12 +280,10 @@ fn serialize_extensions(exts: Vec<NtpExtension>) -> Vec<u8> {
 
 /// has_extension returns true if the packet has an extension of the right kind
 pub fn has_extension(pack: &NtpPacket, kind: NtpExtensionType) -> bool {
-    for ext in pack.exts.clone() {
-        if ext.ext_type == kind {
-            return true;
-        }
-    }
-    return false;
+    pack.exts
+        .clone()
+        .into_iter()
+        .any(|ext| ext.ext_type == kind)
 }
 
 /// is_nts_packet returns true if this packet is plausibly an NTS packet.
@@ -301,12 +296,10 @@ pub fn is_nts_packet(pack: &NtpPacket) -> bool {
 
 /// extract_extension retrieves the extension if it exists, and else none.
 pub fn extract_extension(pack: &NtpPacket, kind: NtpExtensionType) -> Option<NtpExtension> {
-    for ext in pack.exts.clone() {
-        if ext.ext_type == kind {
-            return Some(ext);
-        }
-    }
-    None
+    pack.exts
+        .clone()
+        .into_iter()
+        .find(|ext| ext.ext_type == kind)
 }
 
 /// parse_nts_packet parses an NTS packet.
@@ -328,11 +321,11 @@ pub fn parse_nts_packet<T: Aead>(
                 let oldpos = (reader.position() - 4 - (ext_len as u64)) as usize;
                 let enc_ext_data =
                     parse_decrypt_auth_ext::<T>(&buff[0..oldpos], &auth_ext_contents, decryptor)?;
-                let enc_exts = parse_extensions(&enc_ext_data)?;
+                let auth_enc_exts = parse_extensions(&enc_ext_data)?;
                 return Ok(NtsPacket {
-                    header: header,
-                    auth_exts: auth_exts,
-                    auth_enc_exts: enc_exts,
+                    header,
+                    auth_exts,
+                    auth_enc_exts,
                 });
             }
             _ => {
@@ -340,15 +333,15 @@ pub fn parse_nts_packet<T: Aead>(
                 reader.read_exact(&mut contents)?;
                 auth_exts.push(NtpExtension {
                     ext_type: type_from_wire(ext_type),
-                    contents: contents,
+                    contents,
                 });
             }
         }
     }
-    return Err(Error::new(
+    Err(Error::new(
         ErrorKind::InvalidInput,
         "never saw the authenticator",
-    ));
+    ))
 }
 
 fn parse_decrypt_auth_ext<T: Aead>(
@@ -373,7 +366,7 @@ fn parse_decrypt_auth_ext<T: Aead>(
     let nonce = &auth_ext_contents[4..(4 + nonce_len)];
     let ciphertext = &auth_ext_contents[(4 + nonce_pad_len)..(4 + nonce_pad_len + cipher_len)];
     let res = decryptor.open(nonce, auth_dat, ciphertext);
-    if let Err(_) = res {
+    if res.is_err() {
         return Err(Error::new(ErrorKind::InvalidInput, "authentication failed"));
     }
     Ok(res.unwrap())
@@ -389,21 +382,26 @@ pub fn serialize_nts_packet<T: Aead>(packet: NtsPacket, encryptor: &mut T) -> Ve
     let plaintext = serialize_extensions(packet.auth_enc_exts);
     let mut nonce = [0; NONCE_LEN];
     rand::thread_rng().fill(&mut nonce);
-    let ciphertext = encryptor.seal(&nonce, &buff.get_ref(), &plaintext);
+    let ciphertext = encryptor.seal(&nonce, buff.get_ref(), &plaintext);
 
     let mut authent_buffer = Cursor::new(Vec::new());
-    authent_buffer.write_u16::<BigEndian>(NONCE_LEN as u16)
+    authent_buffer
+        .write_u16::<BigEndian>(NONCE_LEN as u16)
         .expect("Nonce length could not be written, failed to serialize NtsPacket"); // length of the nonce
-    authent_buffer.write_u16::<BigEndian>(ciphertext.len() as u16)
+    authent_buffer
+        .write_u16::<BigEndian>(ciphertext.len() as u16)
         .expect("Ciphertext length could not be written, failed to serialize NtsPacket");
-    authent_buffer.write_all(&nonce)
+    authent_buffer
+        .write_all(&nonce)
         .expect("Nonce could not be written, failed to serialize NtsPacket"); // 16 bytes so no padding
-    authent_buffer.write_all(&ciphertext)
+    authent_buffer
+        .write_all(&ciphertext)
         .expect("Ciphertext could not be written, failed to serialize NtsPacket");
     let padlen = (4 - (ciphertext.len() % 4)) % 4;
     for _i in 0..padlen {
         // pad with zeros: probably cleaner way exists
-        authent_buffer.write_u8(0)
+        authent_buffer
+            .write_u8(0)
             .expect("Padding could not be written, failed to serialize NtsPacket");
     }
     let last_ext = NtpExtension {
@@ -476,8 +474,7 @@ mod tests {
         packet[1] = 0xad;
         packet[2] = 0xbe;
         packet[3] = 0xef;
-        let failure = parse_nts_packet(&packet, enc);
-        if let Ok(_) = failure {
+        if parse_nts_packet(&packet, enc).is_ok() {
             panic!("success when we should have failed");
         }
     }
@@ -485,7 +482,7 @@ mod tests {
     fn test_nts_parse() {
         let key = [0; 32];
         let mut test_aead = Aes128SivAead::new(&key);
-        let packet_header = NtpPacketHeader {
+        let header = NtpPacketHeader {
             leap_indicator: NoLeap,
             version: 4,
             mode: Client,
@@ -502,7 +499,7 @@ mod tests {
         };
 
         let packet = NtsPacket {
-            header: packet_header,
+            header,
             auth_exts: vec![
                 NtpExtension {
                     ext_type: UniqueIdentifier,

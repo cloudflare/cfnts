@@ -21,11 +21,11 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
         if let Ok(port) = settings.get_int("metrics_port") {
             metrics = Some(MetricsConfig {
                 port: port as u16,
-                addr
+                addr,
             });
         }
     }
-    return metrics;
+    metrics
 }
 
 /// Configuration for running an NTP server.
@@ -65,7 +65,8 @@ impl NtpServerConfig {
             //
             // According to `sloggers-0.3.2` source code, the function doesn't return an error at
             // all. There should be no problem unwrapping here.
-            logger: TerminalLoggerBuilder::new().build()
+            logger: TerminalLoggerBuilder::new()
+                .build()
                 .expect("BUG: TerminalLoggerBuilder::build shouldn't return an error."),
 
             // From parameters.
@@ -142,13 +143,13 @@ impl NtpServerConfig {
                     Err(_) => {
                         // Returning a custom message is not a good practice, but we can improve
                         // it later when we don't have to depend on `config` crate.
-                        return Err(config::ConfigError::Message(
-                            String::from("the upstream port is not a valid u64")
-                        ));
-                    },
+                        return Err(config::ConfigError::Message(String::from(
+                            "the upstream port is not a valid u64",
+                        )));
+                    }
                 };
                 Some(port)
-            },
+            }
         };
 
         let upstream_addr = match settings.get_str("upstream_addr") {
@@ -162,18 +163,15 @@ impl NtpServerConfig {
             Ok(addr) => Some(addr),
         };
 
-        let upstream_sock_addr = if upstream_addr.is_some() && upstream_port.is_some() {
-            let sock_addr = SocketAddr::from((
-                // No problem to unwrap here because `upstream_addr` is Some(_).
-                IpAddr::from_str(&upstream_addr.unwrap()).wrap_err()?,
-
-                // No problem to unwrap here because `upstream_port` is Some(_).
-                upstream_port.unwrap(),
-            ));
-            Some(sock_addr)
-        } else {
-            None
-        };
+        let upstream_sock_addr =
+            if let (Some(upstream_addr), Some(upstream_port)) = (upstream_addr, upstream_port) {
+                Some(SocketAddr::from((
+                    IpAddr::from_str(&upstream_addr).wrap_err()?,
+                    upstream_port,
+                )))
+            } else {
+                None
+            };
 
         // Note that all of the file reading stuffs should be at the end of the function so that
         // all the not-file-related stuffs can fail fast.

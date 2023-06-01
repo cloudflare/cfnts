@@ -3,11 +3,11 @@ use crate::nts_ke::client::NtsKeResult;
 use miscreant::aead::Aead;
 use miscreant::aead::Aes128SivAead;
 use rand::Rng;
-use slog::{debug};
+use slog::debug;
 use std::error::Error;
 use std::fmt;
 
-use std::net::{UdpSocket, ToSocketAddrs};
+use std::net::{ToSocketAddrs, UdpSocket};
 use std::time::{Duration, SystemTime};
 
 use super::protocol::parse_nts_packet;
@@ -35,13 +35,21 @@ pub struct NtpResult {
 pub enum NtpClientError {
     NoIpv4AddrFound,
     NoIpv6AddrFound,
-    InvalidUid
+    InvalidUid,
 }
 
 impl std::error::Error for NtpClientError {
     fn description(&self) -> &str {
         match self {
-            _ => "Connection to server failed because address could not be resolved",
+            Self::NoIpv4AddrFound => {
+                "Connection to server failed: IPv4 address could not be resolved"
+            }
+            Self::NoIpv6AddrFound => {
+                "Connection to server failed: IPv6 address could not be resolved"
+            }
+            Self::InvalidUid => {
+                "Connection to server failed: server response UID did not match client request UID"
+            }
         }
     }
     fn cause(&self) -> Option<&dyn std::error::Error> {
@@ -75,7 +83,6 @@ pub fn run_nts_ntp_client(
     logger: &slog::Logger,
     state: NtsKeResult,
 ) -> Result<NtpResult, Box<dyn Error>> {
-
     let mut ip_addrs = (state.next_server.as_str(), state.next_port).to_socket_addrs()?;
     let addr;
     let socket;
@@ -83,14 +90,14 @@ pub fn run_nts_ntp_client(
         if use_ipv4 {
             // mandated to use ipv4
             addr = ip_addrs.find(|&x| x.is_ipv4());
-            if addr == None {
+            if addr.is_none() {
                 return Err(Box::new(NoIpv4AddrFound));
             }
             socket = UdpSocket::bind("0.0.0.0:0");
         } else {
             // mandated to use ipv6
             addr = ip_addrs.find(|&x| x.is_ipv6());
-            if addr == None {
+            if addr.is_none() {
                 return Err(Box::new(NoIpv6AddrFound));
             }
             socket = UdpSocket::bind("[::]:0");
@@ -128,7 +135,7 @@ pub fn run_nts_ntp_client(
     };
     let mut unique_id: Vec<u8> = vec![0; 32];
     rand::thread_rng().fill(&mut unique_id[..]);
-    let exts = vec![
+    let auth_exts = vec![
         NtpExtension {
             ext_type: UniqueIdentifier,
             contents: unique_id.clone(),
@@ -139,8 +146,8 @@ pub fn run_nts_ntp_client(
         },
     ];
     let packet = NtsPacket {
-        header: header,
-        auth_exts: exts,
+        header,
+        auth_exts,
         auth_enc_exts: vec![],
     };
     socket.connect(addr.unwrap())?;
@@ -156,7 +163,6 @@ pub fn run_nts_ntp_client(
     match received {
         Err(x) => Err(Box::new(x)),
         Ok(packet) => {
-
             // check if server response contains the same UniqueIdentifier as client request
             let resp_unique_id = packet.auth_exts[0].clone().contents;
             if resp_unique_id != unique_id {
@@ -169,6 +175,6 @@ pub fn run_nts_ntp_client(
                     + (timestamp_to_float(packet.header.transmit_timestamp) - t4))
                     / 2.0,
             })
-        },
+        }
     }
 }

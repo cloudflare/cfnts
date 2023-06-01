@@ -4,8 +4,8 @@
 
 //! NTS-KE server configuration.
 
-use rustls::{Certificate, PrivateKey};
 use rustls::internal::pemfile;
+use rustls::{Certificate, PrivateKey};
 
 use sloggers::terminal::TerminalLoggerBuilder;
 use sloggers::Build;
@@ -24,11 +24,11 @@ fn get_metrics_config(settings: &config::Config) -> Option<MetricsConfig> {
         if let Ok(port) = settings.get_int("metrics_port") {
             metrics = Some(MetricsConfig {
                 port: port as u16,
-                addr
+                addr,
             });
         }
     }
-    return metrics;
+    metrics
 }
 
 /// Configuration for running an NTS-KE server.
@@ -78,7 +78,8 @@ impl KeServerConfig {
             //
             // According to `sloggers-0.3.2` source code, the function doesn't return an error at
             // all. There should be no problem unwrapping here.
-            logger: TerminalLoggerBuilder::new().build()
+            logger: TerminalLoggerBuilder::new()
+                .build()
                 .expect("BUG: TerminalLoggerBuilder::build shouldn't return an error."),
 
             tls_certs: Vec::new(),
@@ -163,7 +164,7 @@ impl KeServerConfig {
                 }
                 // Return success.
                 Ok(())
-            },
+            }
             // We don't use Err(_) here because if the error type of `rustls` changes in the
             // future, we will get noticed.
             //
@@ -197,7 +198,7 @@ impl KeServerConfig {
                 }
                 // Return success.
                 Ok(())
-            },
+            }
             // We don't use Err(_) here because if the error type of `rustls` changes in the
             // future, we will get noticed.
             //
@@ -243,10 +244,10 @@ impl KeServerConfig {
             Err(_) => {
                 // Returning a custom message is not a good practice, but we can improve it later
                 // when we don't have to depend on `config` crate.
-                return Err(config::ConfigError::Message(
-                    String::from("the next port is not a valid u16")
-                ));
-            },
+                return Err(config::ConfigError::Message(String::from(
+                    "the next port is not a valid u16",
+                )));
+            }
         };
         let memcached_url = settings.get_str("memc_url")?;
 
@@ -269,12 +270,12 @@ impl KeServerConfig {
                     Err(_) => {
                         // Returning a custom message is not a good practice, but we can improve
                         // it later when we don't have to depend on `config` crate.
-                        return Err(config::ConfigError::Message(
-                            String::from("the connection timeout is not a valid u64")
-                        ));
-                    },
+                        return Err(config::ConfigError::Message(String::from(
+                            "the connection timeout is not a valid u64",
+                        )));
+                    }
                 }
-            },
+            }
         };
 
         // Resolves metrics configuration.
@@ -300,7 +301,9 @@ impl KeServerConfig {
         );
 
         config.import_tls_certs(&certs_filename).wrap_err()?;
-        config.import_tls_secret_keys(&secret_keys_filename).wrap_err()?;
+        config
+            .import_tls_secret_keys(&secret_keys_filename)
+            .wrap_err()?;
 
         let addrs = settings.get_array("addr")?;
         for addr in addrs {

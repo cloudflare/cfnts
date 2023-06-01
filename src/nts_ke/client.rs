@@ -13,17 +13,17 @@ use super::records;
 
 use crate::cookie::NTSKeys;
 use crate::nts_ke::records::{
-    // Functions.
-    serialize,
     deserialize,
     process_record,
 
+    // Functions.
+    serialize,
     // Records.
     AeadAlgorithmRecord,
-    EndOfMessageRecord,
-
     // Errors.
     DeserializeError,
+
+    EndOfMessageRecord,
 
     // Enums.
     KnownAeadAlgorithm,
@@ -96,13 +96,13 @@ pub fn run_nts_ke_client(
         if use_ipv4 {
             // mandated to use ipv4
             addr = ip_addrs.find(|&x| x.is_ipv4());
-            if addr == None {
+            if addr.is_none() {
                 return Err(Box::new(NtsKeParseError::NoIpv4AddrFound));
             }
         } else {
             // mandated to use ipv6
             addr = ip_addrs.find(|&x| x.is_ipv6());
-            if addr == None {
+            if addr.is_none() {
                 return Err(Box::new(NtsKeParseError::NoIpv6AddrFound));
             }
         }
@@ -123,7 +123,7 @@ pub fn run_nts_ke_client(
     let clientrec = &mut serialize(next_protocol_record);
     clientrec.append(&mut serialize(aead_record));
     clientrec.append(&mut serialize(end_record));
-    tls_stream.write(clientrec)?;
+    tls_stream.write_all(clientrec)?;
     tls_stream.flush()?;
     debug!(logger, "Request transmitted");
     let keys = records::gen_key(tls_stream.sess).unwrap();
@@ -204,12 +204,12 @@ pub fn run_nts_ke_client(
     };
 
     Ok(NtsKeResult {
-        aead_scheme: aead_scheme,
+        aead_scheme,
         cookies: state.cookies,
         next_protocols: state.next_protocols,
         next_server: state.next_server.unwrap_or(client_config.host.clone()),
         next_port: state.next_port.unwrap_or(DEFAULT_NTP_PORT),
-        keys: keys,
+        keys,
         use_ipv4: client_config.use_ipv4,
     })
 }

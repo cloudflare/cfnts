@@ -19,8 +19,8 @@ use crate::cfsock;
 
 use super::connection::KeServerConn;
 use super::connection::KeServerConnState;
-use super::server::KeServer;
-use super::server::KeServerState;
+use super::ke_server::KeServer;
+use super::ke_server::KeServerState;
 
 const LISTENER_MIO_TOKEN_ID: usize = 0;
 const CONNECTION_MIO_TOKEN_ID_MIN: usize = LISTENER_MIO_TOKEN_ID + 1;
@@ -115,7 +115,10 @@ impl KeServerListener {
                 if token == LISTENER_MIO_TOKEN {
                     // Start accepting a new connection.
                     if let Err(error) = self.accept() {
-                        error!(self.logger, "accept failed unrecoverably with error: {}", error);
+                        error!(
+                            self.logger,
+                            "accept failed unrecoverably with error: {}", error
+                        );
                     }
                     continue;
                 };
@@ -148,7 +151,10 @@ impl KeServerListener {
                 }
 
                 // If it's not WouldBlock, it's an error.
-                error!(self.logger, "encountered error while accepting connection; err={}", error);
+                error!(
+                    self.logger,
+                    "encountered error while accepting connection; err={}", error
+                );
 
                 // TODO: I don't understand why we need another tcp listener and register a new
                 // event here. I will figure it out after I finish refactoring everything.
@@ -164,7 +170,7 @@ impl KeServerListener {
 
                 // TODO: I will figure why it returns Ok later.
                 return Ok(());
-            },
+            }
         };
 
         // Successfully accepting a connection.
@@ -183,7 +189,7 @@ impl KeServerListener {
         }
 
         // Create a new connection instance.
-        let connection = KeServerConn::new(tcp_stream, token, &self);
+        let connection = KeServerConn::new(tcp_stream, token, self);
         // TODO: Fix the unwrap later.
         connection.register(&mut self.poll).unwrap();
 
@@ -219,7 +225,7 @@ impl KeServerListener {
                 // The connection associated with the token may not exist because, when we close
                 // the connection, it's not possible to find an entry in the heap. In which case,
                 // we can just pop the deadline heap.
-                if let Some(mut connection) = self.connections.remove(&token) {
+                if let Some(mut connection) = self.connections.remove(token) {
                     error!(self.logger, "forcible shutdown after timeout");
                     connection.shutdown();
                 }

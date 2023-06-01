@@ -1,18 +1,34 @@
-version: "3"
+version: "3.8"
 services:
   server:
     build:
       context: .
-      dockerfile: Dockerfile.server
+      dockerfile: Dockerfile.cfnts
     depends_on:
       - memcache
+    volumes:
+      - ./tests:/tests
+      - ./scripts:/scripts
+    entrypoint: ["/scripts/run_server.sh"]
   client:
     build:
       context: .
-      dockerfile: Dockerfile.client
+      dockerfile: Dockerfile.cfnts
     depends_on:
       - server
+    volumes:
+      - ./tests:/tests
+      - ./scripts:/scripts
+    entrypoint: ["/scripts/run_client.sh"]
   memcache:
     build:
       context: .
       dockerfile: Dockerfile.memcache
+    volumes:
+      - ./scripts:/scripts
+    entrypoint: ["/scripts/run_memcached.sh"]
+  clippy:
+    build:
+      context: .
+      dockerfile: Dockerfile.clippy
+    command: ["--all-features", "--", "-D", "warnings"]

@@ -1,6 +1,6 @@
 use libc::*;
-use net2::{TcpBuilder, UdpBuilder};
-use std::net::{SocketAddr, SocketAddr::*};
+use socket2::{Domain, Socket, Type};
+use std::net::SocketAddr;
 use std::os::unix::io::AsRawFd;
 
 #[cfg(target_os = "linux")]
@@ -30,22 +30,26 @@ fn set_freebind(_fd: c_int) -> Result<(), std::io::Error> {
 }
 
 pub fn tcp_listener(addr: &SocketAddr) -> Result<std::net::TcpListener, std::io::Error> {
-    let builder = match addr {
-        V4(_) => TcpBuilder::new_v4()?,
-        V6(_) => TcpBuilder::new_v6()?,
+    let domain = match addr {
+        SocketAddr::V4(..) => Domain::IPV4,
+        SocketAddr::V6(..) => Domain::IPV6,
     };
-    builder.reuse_address(true)?;
-    set_freebind(builder.as_raw_fd())?;
-    builder.bind(addr)?;
-    builder.listen(128)
+    let socket = Socket::new(domain, Type::STREAM, None)?;
+    socket.set_reuse_address(true)?;
+    set_freebind(socket.as_raw_fd())?;
+    socket.bind(&(*addr).into())?;
+    socket.listen(128)?;
+    Ok(socket.into())
 }
 
 pub fn udp_listen(addr: &SocketAddr) -> Result<std::net::UdpSocket, std::io::Error> {
-    let builder = match addr {
-        V4(_) => UdpBuilder::new_v4()?,
-        V6(_) => UdpBuilder::new_v6()?,
+    let domain = match addr {
+        SocketAddr::V4(..) => Domain::IPV4,
+        SocketAddr::V6(..) => Domain::IPV6,
     };
-    builder.reuse_address(true)?;
-    set_freebind(builder.as_raw_fd())?;
-    builder.bind(addr)
+    let socket = Socket::new(domain, Type::DGRAM, None)?;
+    socket.set_reuse_address(true)?;
+    set_freebind(socket.as_raw_fd())?;
+    socket.bind(&(*addr).into())?;
+    Ok(socket.into())
 }

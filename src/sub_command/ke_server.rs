@@ -6,7 +6,7 @@
 
 use std::process;
 
-use crate::nts_ke::server::{KeServerConfig, KeServer};
+use crate::nts_ke::server::{KeServer, KeServerConfig};
 
 /// Get a configuration file path for `ke-server`.
 ///
@@ -35,7 +35,7 @@ pub fn run(matches: &clap::ArgMatches<'_>) {
         Err(err) => {
             eprintln!("{}", err);
             process::exit(1);
-        },
+        }
     };
 
     let logger = global_logger.new(slog::o!("component" => "nts_ke"));

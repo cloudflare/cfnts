@@ -13,17 +13,17 @@ use super::records;
 
 use crate::cookie::NTSKeys;
 use crate::nts_ke::records::{
-    // Functions.
-    serialize,
     deserialize,
     process_record,
 
+    // Functions.
+    serialize,
     // Records.
     AeadAlgorithmRecord,
-    EndOfMessageRecord,
-
     // Errors.
     DeserializeError,
+
+    EndOfMessageRecord,
 
     // Enums.
     KnownAeadAlgorithm,

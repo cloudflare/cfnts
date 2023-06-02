@@ -6,10 +6,10 @@
 
 mod config;
 mod connection;
-mod listener;
 mod ke_server;
+mod listener;
 
 // We expose only two structs: KeServer and KeServerConfig. KeServer is used to run an instant of
 // the NTS-KE server and KeServerConfig is used to instantiate KeServer.
-pub use self::ke_server::KeServer;
 pub use self::config::KeServerConfig;
+pub use self::ke_server::KeServer;

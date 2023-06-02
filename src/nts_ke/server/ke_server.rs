@@ -8,9 +8,9 @@ use slog::info;
 
 use std::sync::{Arc, RwLock};
 
+use crate::key_rotator::periodic_rotate;
 use crate::key_rotator::KeyRotator;
 use crate::key_rotator::RotateError;
-use crate::key_rotator::periodic_rotate;
 use crate::metrics;
 
 use super::config::KeServerConfig;
@@ -57,7 +57,6 @@ impl KeServer {
         let rotator = KeyRotator::connect(
             String::from("/nts/nts-keys"),
             String::from(config.memcached_url()),
-
             // We need to clone all of the following properties because the key rotator also
             // has to own them.
             config.cookie_key().clone(),
@@ -79,13 +78,12 @@ impl KeServer {
                 .set_single_cert(
                     // rustls::ServerConfig wants to own both of them.
                     config.tls_certs.clone(),
-                    config.tls_secret_keys[0].clone()
+                    config.tls_secret_keys[0].clone(),
                 )
                 .expect("invalid key or certificate");
 
             // According to the NTS specification, ALPN protocol must be "ntske/1".
-            server_config
-                .set_protocols(&[Vec::from("ntske/1".as_bytes())]);
+            server_config.set_protocols(&[Vec::from("ntske/1".as_bytes())]);
 
             server_config
         };

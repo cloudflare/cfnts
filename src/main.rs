@@ -43,7 +43,9 @@ fn create_logger(matches: &clap::ArgMatches<'_>) -> slog::Logger {
     // According to `sloggers-0.3.2` source code, the function doesn't return an error at all.
     // There should be no problem unwrapping here. It has a return type `Result` because it's a
     // signature for `sloggers::Build` trait.
-    builder.build().expect("BUG: TerminalLoggerBuilder::build shouldn't return an error.")
+    builder
+        .build()
+        .expect("BUG: TerminalLoggerBuilder::build shouldn't return an error.")
 }
 
 /// The entry point of cfnts.
@@ -67,8 +69,10 @@ fn main() {
     let _scope_guard = slog_scope::set_global_logger(logger.clone());
 
     if matches.subcommand.is_none() {
-        eprintln!("please specify a valid subcommand: only client, ke-server, and ntp-server \
-                   are supported.");
+        eprintln!(
+            "please specify a valid subcommand: only client, ke-server, and ntp-server \
+                   are supported."
+        );
         process::exit(1);
     }
 

@@ -7,5 +7,5 @@
 mod config;
 mod ntp_server;
 
-pub use self::ntp_server::start_ntp_server;
 pub use self::config::NtpServerConfig;
+pub use self::ntp_server::start_ntp_server;

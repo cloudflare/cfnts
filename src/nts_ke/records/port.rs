@@ -5,7 +5,6 @@
 //! Port negotiation record representation.
 /// This Port negotiation will not be sent from the server because currently, we are not
 /// interested in running an NTP server on different port.
-
 use super::KeRecordTrait;
 use super::Party;
 
@@ -16,10 +15,7 @@ pub struct PortRecord {
 
 impl PortRecord {
     pub fn new(sender: Party, port: u16) -> PortRecord {
-        PortRecord {
-            sender,
-            port,
-        }
+        PortRecord { sender, port }
     }
 
     pub fn port(&self) -> u16 {
@@ -53,10 +49,7 @@ impl KeRecordTrait for PortRecord {
         } else {
             let port = u16::from_be_bytes([bytes[0], bytes[1]]);
 
-            Ok(PortRecord {
-                sender,
-                port,
-            })
+            Ok(PortRecord { sender, port })
         }
     }
 }

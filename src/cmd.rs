@@ -12,17 +12,32 @@ fn create_clap_client_subcommand<'a, 'b>() -> App<'a, 'b> {
     let args = [
         // The hostname is always required and will immediately
         // follow the subcommand string.
-        Arg::with_name("host").index(1).required(true)
+        Arg::with_name("host")
+            .index(1)
+            .required(true)
             .help("NTS server's hostname (do not include port)"),
-
         // The rest will be passed as unrequired command-line options.
-        Arg::with_name("port").long("port").short("p").takes_value(true).required(false)
+        Arg::with_name("port")
+            .long("port")
+            .short("p")
+            .takes_value(true)
+            .required(false)
             .help("Specifies NTS server's port. The default port number is 4460."),
-        Arg::with_name("cert").long("cert").short("c").takes_value(true).required(false)
+        Arg::with_name("cert")
+            .long("cert")
+            .short("c")
+            .takes_value(true)
+            .required(false)
             .help("Specifies a path to the trusted certificate in PEM format."),
-        Arg::with_name("ipv4").long("ipv4").short("4").conflicts_with("ipv6")
+        Arg::with_name("ipv4")
+            .long("ipv4")
+            .short("4")
+            .conflicts_with("ipv6")
             .help("Forces use of IPv4 only"),
-        Arg::with_name("ipv6").long("ipv6").short("6").conflicts_with("ipv4")
+        Arg::with_name("ipv6")
+            .long("ipv6")
+            .short("6")
+            .conflicts_with("ipv4")
             .help("Forces use of IPv6 only"),
     ];
 
@@ -35,13 +50,16 @@ fn create_clap_client_subcommand<'a, 'b>() -> App<'a, 'b> {
 /// Create the subcommand `ke-server`.
 fn create_clap_ke_server_subcommand<'a, 'b>() -> App<'a, 'b> {
     // Arguments for `ke-server` subcommand.
-    let args = [
-        Arg::with_name("configfile").long("file").short("f")
-            .takes_value(true).required(false)
-            .help("Specifies a path to the configuration file. If the path is not specified, \
+    let args = [Arg::with_name("configfile")
+        .long("file")
+        .short("f")
+        .takes_value(true)
+        .required(false)
+        .help(
+            "Specifies a path to the configuration file. If the path is not specified, \
                    the system-wide configuration file (/etc/cfnts/ke-server.config) will be \
-                   used instead")
-    ];
+                   used instead",
+        )];
 
     // Create a new subcommand.
     SubCommand::with_name("ke-server")
@@ -52,13 +70,16 @@ fn create_clap_ke_server_subcommand<'a, 'b>() -> App<'a, 'b> {
 /// Create the subcommand `ntp-server`.
 fn create_clap_ntp_server_subcommand<'a, 'b>() -> App<'a, 'b> {
     // Arguments for `ntp-server` subcommand.
-    let args = [
-        Arg::with_name("configfile").long("file").short("f")
-            .takes_value(true).required(false)
-            .help("Specifies a path to the configuration file. If the path is not specified, \
+    let args = [Arg::with_name("configfile")
+        .long("file")
+        .short("f")
+        .takes_value(true)
+        .required(false)
+        .help(
+            "Specifies a path to the configuration file. If the path is not specified, \
                    the system-wide configuration file (/etc/cfnts/ntp-server.config) will be \
-                   used instead")
-    ];
+                   used instead",
+        )];
 
     // Create a new subcommand.
     SubCommand::with_name("ntp-server")
@@ -72,7 +93,9 @@ pub fn create_clap_command() -> App<'static, 'static> {
         .about(env!("CARGO_PKG_DESCRIPTION"))
         .version(env!("CARGO_PKG_VERSION"))
         .arg(
-            Arg::with_name("debug").long("debug").short("d")
+            Arg::with_name("debug")
+                .long("debug")
+                .short("d")
                 .help("Turns on debug logging"),
         )
         .subcommands(vec![

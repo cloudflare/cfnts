@@ -10,54 +10,50 @@ use rustls::Session;
 
 use slog::{debug, error, info};
 
-use std::sync::{Arc, RwLock};
 use std::io::{Read, Write};
+use std::sync::{Arc, RwLock};
 
 use crate::cookie::{make_cookie, NTSKeys};
 use crate::key_rotator::KeyRotator;
 use crate::nts_ke::records::gen_key;
 use crate::nts_ke::records::{
-    // Functions.
-    serialize,
     deserialize,
     process_record,
 
+    // Functions.
+    serialize,
     // Records.
     AeadAlgorithmRecord,
-    EndOfMessageRecord,
-    NextProtocolRecord,
-    NewCookieRecord,
-    PortRecord,
-
     // Errors.
     DeserializeError,
 
-    // Structs.
-    ReceivedNtsKeRecordState,
-
+    EndOfMessageRecord,
     // Enums.
     KnownAeadAlgorithm,
     KnownNextProtocol,
+    NewCookieRecord,
+    NextProtocolRecord,
     Party,
+
+    PortRecord,
+
+    // Structs.
+    ReceivedNtsKeRecordState,
 
     // Constants.
     HEADER_SIZE,
 };
 
-use super::listener::KeServerListener;
 use super::ke_server::KeServerState;
+use super::listener::KeServerListener;
 
 // response uses the configuration and the keys and computes the response
 // sent to the client.
 fn response(keys: NTSKeys, rotator: &Arc<RwLock<KeyRotator>>, port: u16) -> Vec<u8> {
     let mut response: Vec<u8> = Vec::new();
 
-    let next_protocol_record = NextProtocolRecord::from(vec![
-        KnownNextProtocol::Ntpv4,
-    ]);
-    let aead_record = AeadAlgorithmRecord::from(vec![
-        KnownAeadAlgorithm::AeadAesSivCmac256,
-    ]);
+    let next_protocol_record = NextProtocolRecord::from(vec![KnownNextProtocol::Ntpv4]);
+    let aead_record = AeadAlgorithmRecord::from(vec![KnownAeadAlgorithm::AeadAesSivCmac256]);
     let port_record = PortRecord::new(Party::Server, port);
     let end_record = EndOfMessageRecord;
 
@@ -131,7 +127,9 @@ impl KeServerConn {
         // Create a TLS session from a server-wide configuration.
         let tls_session = rustls::ServerSession::new(&server_state.tls_server_config);
         // Create a child logger for the connection.
-        let logger = listener.logger().new(slog::o!("client" => listener.addr().to_string()));
+        let logger = listener
+            .logger()
+            .new(slog::o!("client" => listener.addr().to_string()));
 
         let ntske_state = ReceivedNtsKeRecordState {
             finished: false,
@@ -237,7 +235,10 @@ impl KeServerConn {
             while !self.ntske_state.finished {
                 // need to read 4 bytes to get the header.
                 if reader.len() < HEADER_SIZE {
-                    info!(self.logger, "readable nts-ke stream is not enough to read header");
+                    info!(
+                        self.logger,
+                        "readable nts-ke stream is not enough to read header"
+                    );
                     self.ntske_buffer = Vec::from(reader);
                     return;
                 }
@@ -245,7 +246,10 @@ impl KeServerConn {
                 // need to read the body_length to get the body.
                 let body_length = u16::from_be_bytes([reader[2], reader[3]]) as usize;
                 if reader.len() < HEADER_SIZE + body_length {
-                    info!(self.logger, "readable nts-ke stream is not enough to read body");
+                    info!(
+                        self.logger,
+                        "readable nts-ke stream is not enough to read body"
+                    );
                     self.ntske_buffer = Vec::from(reader);
                     return;
                 }
@@ -289,8 +293,12 @@ impl KeServerConn {
             if self.state == KeServerConnState::Opened {
                 // TODO: Fix unwrap later.
                 self.tls_session
-                    .write_all(&response(keys, &self.server_state.rotator,
-                                         self.server_state.config.next_port)).unwrap();
+                    .write_all(&response(
+                        keys,
+                        &self.server_state.rotator,
+                        self.server_state.config.next_port,
+                    ))
+                    .unwrap();
                 // Mark that the response is sent.
                 self.state = KeServerConnState::ResponseSent;
             }

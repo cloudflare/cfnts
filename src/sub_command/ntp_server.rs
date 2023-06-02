@@ -6,8 +6,8 @@
 
 use std::process;
 
-use crate::ntp::server::NtpServerConfig;
 use crate::ntp::server::start_ntp_server;
+use crate::ntp::server::NtpServerConfig;
 
 /// Get a configuration file path for `ntp-server`.
 ///
@@ -36,7 +36,7 @@ pub fn run(matches: &clap::ArgMatches<'_>) {
         Err(err) => {
             eprintln!("{}", err);
             process::exit(1);
-        },
+        }
     };
 
     let logger = global_logger.new(slog::o!("component" => "ntp"));

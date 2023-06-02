@@ -45,7 +45,7 @@ impl KeRecordTrait for WarningRecord {
 
     fn from_bytes(_: Party, bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() != 2 {
-            return Err(String::from("the body length of Warning must be two."))
+            return Err(String::from("the body length of Warning must be two."));
         }
 
         let warning_code = u16::from_be_bytes([bytes[0], bytes[1]]);
@@ -58,4 +58,3 @@ impl KeRecordTrait for WarningRecord {
         Err(String::from("unknown warning code"))
     }
 }
-

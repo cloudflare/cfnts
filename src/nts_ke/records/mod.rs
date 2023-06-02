@@ -4,28 +4,28 @@
 
 //! NTS-KE record representation.
 
-mod end_of_message;
-mod next_protocol;
-mod error;
-mod warning;
 mod aead_algorithm;
+mod end_of_message;
+mod error;
 mod new_cookie;
-mod server;
+mod next_protocol;
 mod port;
+mod server;
+mod warning;
 
 // We pub use everything in the submodules. You can limit the scope of usage by putting it the
 // submodule itself.
-pub use self::end_of_message::*;
-pub use self::next_protocol::*;
-pub use self::error::*;
-pub use self::warning::*;
 pub use self::aead_algorithm::*;
+pub use self::end_of_message::*;
+pub use self::error::*;
 pub use self::new_cookie::*;
-pub use self::server::*;
+pub use self::next_protocol::*;
 pub use self::port::*;
+pub use self::server::*;
+pub use self::warning::*;
 
-use std::fmt;
 use rustls::TLSError;
+use std::fmt;
 
 use crate::cookie::NTSKeys;
 
@@ -193,8 +193,12 @@ impl std::error::Error for NtsKeParseError {
         match self {
             Self::RecordAfterEnd => "Received record after connection finished",
             Self::ErrorRecord => "Received NTS error record",
-            Self::NoIpv4AddrFound => "Connection to server failed: IPv4 address could not be resolved",
-            Self::NoIpv6AddrFound => "Connection to server failed: IPv6 address could not be resolved",
+            Self::NoIpv4AddrFound => {
+                "Connection to server failed: IPv4 address could not be resolved"
+            }
+            Self::NoIpv6AddrFound => {
+                "Connection to server failed: IPv6 address could not be resolved"
+            }
         }
     }
     fn cause(&self) -> Option<&dyn std::error::Error> {

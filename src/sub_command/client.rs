@@ -10,10 +10,7 @@ use std::fs;
 use std::io::BufReader;
 use std::process;
 
-use rustls::{
-    internal::pemfile::certs,
-    Certificate,
-};
+use rustls::{internal::pemfile::certs, Certificate};
 
 use crate::error::WrapError;
 use crate::ntp::client::run_nts_ntp_client;
@@ -24,14 +21,13 @@ pub struct ClientConfig {
     pub host: String,
     pub port: Option<String>,
     pub trusted_cert: Option<Certificate>,
-    pub use_ipv4: Option<bool>
+    pub use_ipv4: Option<bool>,
 }
 
 pub fn load_tls_certs(path: String) -> Result<Vec<Certificate>, config::ConfigError> {
-    certs(&mut BufReader::new(fs::File::open(&path).wrap_err()?))
-        .map_err(|()| config::ConfigError::Message(
-            format!("could not load certificate from {}", &path)
-        ))
+    certs(&mut BufReader::new(fs::File::open(&path).wrap_err()?)).map_err(|()| {
+        config::ConfigError::Message(format!("could not load certificate from {}", &path))
+    })
 }
 
 /// The entry point of `client`.
@@ -39,10 +35,7 @@ pub fn run(matches: &clap::ArgMatches<'_>) {
     // This should return the clone of `logger` in the main function.
     let logger = slog_scope::logger();
 
-    let host = matches
-        .value_of("host")
-        .map(String::from)
-        .unwrap();
+    let host = matches.value_of("host").map(String::from).unwrap();
     let port = matches.value_of("port").map(String::from);
     let cert_file = matches.value_of("cert").map(String::from);
 

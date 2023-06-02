@@ -35,10 +35,7 @@ fn wait_for_req_or_eof(dest: &net::TcpStream, logger: slog::Logger) -> Result<()
         req_line.clear();
         let res = reader.read_line(&mut req_line);
         if let Err(e) = res {
-            error!(
-                logger,
-                "failure to read request {:?}", e
-            );
+            error!(logger, "failure to read request {:?}", e);
             return Err(e);
         }
         if let Ok(0) = res {
@@ -68,13 +65,10 @@ fn serve_metrics(mut dest: net::TcpStream, logger: slog::Logger) {
             logger,
             "error in wait_for_req_or_eof: {:?}, unable to serve metrics", e
         );
-        if let Err(e)  = dest.shutdown(net::Shutdown::Both) {
-            error!(
-                logger,
-                "shutting down TcpStream failed with error: {:?}", e
-                );
+        if let Err(e) = dest.shutdown(net::Shutdown::Both) {
+            error!(logger, "shutting down TcpStream failed with error: {:?}", e);
         }
-        return
+        return;
     }
     if let Err(e) = dest.write(scrape_result().as_bytes()) {
         error!(
@@ -82,11 +76,8 @@ fn serve_metrics(mut dest: net::TcpStream, logger: slog::Logger) {
             "write to TcpStream failed with error: {:?}, unable to serve metrics", e
         );
     }
-    if let Err(e)  = dest.shutdown(net::Shutdown::Write) {
-        error!(
-            logger,
-            "failure to shut down {:?}", e
-        );
+    if let Err(e) = dest.shutdown(net::Shutdown::Write) {
+        error!(logger, "failure to shut down {:?}", e);
     }
 }
 

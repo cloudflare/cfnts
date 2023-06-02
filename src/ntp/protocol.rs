@@ -222,10 +222,7 @@ pub fn serialize_header(head: NtpPacketHeader) -> Vec<u8> {
 pub fn parse_ntp_packet(buff: &[u8]) -> Result<NtpPacket, std::io::Error> {
     let header = parse_packet_header(buff)?;
     let exts = parse_extensions(&buff[48..])?;
-    Ok(NtpPacket {
-        header,
-        exts,
-    })
+    Ok(NtpPacket { header, exts })
 }
 
 /// Properly parsing NTP extensions in accordance with RFC 7822 is not necessary
@@ -388,18 +385,23 @@ pub fn serialize_nts_packet<T: Aead>(packet: NtsPacket, encryptor: &mut T) -> Ve
     let ciphertext = encryptor.seal(&nonce, buff.get_ref(), &plaintext);
 
     let mut authent_buffer = Cursor::new(Vec::new());
-    authent_buffer.write_u16::<BigEndian>(NONCE_LEN as u16)
+    authent_buffer
+        .write_u16::<BigEndian>(NONCE_LEN as u16)
         .expect("Nonce length could not be written, failed to serialize NtsPacket"); // length of the nonce
-    authent_buffer.write_u16::<BigEndian>(ciphertext.len() as u16)
+    authent_buffer
+        .write_u16::<BigEndian>(ciphertext.len() as u16)
         .expect("Ciphertext length could not be written, failed to serialize NtsPacket");
-    authent_buffer.write_all(&nonce)
+    authent_buffer
+        .write_all(&nonce)
         .expect("Nonce could not be written, failed to serialize NtsPacket"); // 16 bytes so no padding
-    authent_buffer.write_all(&ciphertext)
+    authent_buffer
+        .write_all(&ciphertext)
         .expect("Ciphertext could not be written, failed to serialize NtsPacket");
     let padlen = (4 - (ciphertext.len() % 4)) % 4;
     for _i in 0..padlen {
         // pad with zeros: probably cleaner way exists
-        authent_buffer.write_u8(0)
+        authent_buffer
+            .write_u8(0)
             .expect("Padding could not be written, failed to serialize NtsPacket");
     }
     let last_ext = NtpExtension {

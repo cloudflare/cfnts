@@ -115,7 +115,10 @@ impl KeServerListener {
                 if token == LISTENER_MIO_TOKEN {
                     // Start accepting a new connection.
                     if let Err(error) = self.accept() {
-                        error!(self.logger, "accept failed unrecoverably with error: {}", error);
+                        error!(
+                            self.logger,
+                            "accept failed unrecoverably with error: {}", error
+                        );
                     }
                     continue;
                 };
@@ -148,7 +151,10 @@ impl KeServerListener {
                 }
 
                 // If it's not WouldBlock, it's an error.
-                error!(self.logger, "encountered error while accepting connection; err={}", error);
+                error!(
+                    self.logger,
+                    "encountered error while accepting connection; err={}", error
+                );
 
                 // TODO: I don't understand why we need another tcp listener and register a new
                 // event here. I will figure it out after I finish refactoring everything.
@@ -164,7 +170,7 @@ impl KeServerListener {
 
                 // TODO: I will figure why it returns Ok later.
                 return Ok(());
-            },
+            }
         };
 
         // Successfully accepting a connection.

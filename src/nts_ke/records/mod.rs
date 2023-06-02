@@ -190,7 +190,12 @@ pub enum NtsKeParseError {
 
 impl std::error::Error for NtsKeParseError {
     fn description(&self) -> &str {
-        "Something is wrong"
+        match self {
+            Self::RecordAfterEnd => "Received record after connection finished",
+            Self::ErrorRecord => "Received NTS error record",
+            Self::NoIpv4AddrFound => "Connection to server failed: IPv4 address could not be resolved",
+            Self::NoIpv6AddrFound => "Connection to server failed: IPv6 address could not be resolved",
+        }
     }
     fn cause(&self) -> Option<&dyn std::error::Error> {
         None
@@ -203,7 +208,7 @@ impl fmt::Display for NtsKeParseError {
     }
 }
 
-/// Read https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-19#section-4
+/// Read https://datatracker.ietf.org/doc/html/rfc8915#section-4
 pub fn process_record(
     record: KeRecord,
     state: &mut ReceivedNtsKeRecordState,

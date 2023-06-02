@@ -40,7 +40,11 @@ pub enum NtpClientError {
 
 impl std::error::Error for NtpClientError {
     fn description(&self) -> &str {
-        "Connection to server failed because address could not be resolved"
+        match self {
+                Self::NoIpv4AddrFound => "Connection to server failed: IPv4 address could not be resolved",
+                Self::NoIpv6AddrFound => "Connection to server failed: IPv6 address could not be resolved",
+                Self::InvalidUid => "Connection to server failed: server response UID did not match client request UID",
+        }
     }
     fn cause(&self) -> Option<&dyn std::error::Error> {
         None

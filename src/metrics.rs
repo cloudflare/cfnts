@@ -37,9 +37,8 @@ fn wait_for_req_or_eof(dest: &net::TcpStream, logger: slog::Logger) -> Result<()
         if let Err(e) = res {
             error!(
                 logger,
-                "failure to read request {:?}, unable to serve metrics", e
+                "failure to read request {:?}", e
             );
-            let _ = dest.shutdown(net::Shutdown::Both);
             return Err(e);
         }
         if let Ok(0) = res {
@@ -63,16 +62,32 @@ fn scrape_result() -> String {
         + &String::from_utf8(buffer).unwrap()
 }
 
-fn serve_metrics(mut dest: net::TcpStream, logger: slog::Logger) -> Result<(), std::io::Error> {
-    wait_for_req_or_eof(&dest, logger.clone())?;
+fn serve_metrics(mut dest: net::TcpStream, logger: slog::Logger) {
+    if let Err(e) = wait_for_req_or_eof(&dest, logger.clone()) {
+        error!(
+            logger,
+            "error in wait_for_req_or_eof: {:?}, unable to serve metrics", e
+        );
+        if let Err(e)  = dest.shutdown(net::Shutdown::Both) {
+            error!(
+                logger,
+                "shutting down TcpStream failed with error: {:?}", e
+                );
+        }
+        return
+    }
     if let Err(e) = dest.write(scrape_result().as_bytes()) {
         error!(
             logger,
             "write to TcpStream failed with error: {:?}, unable to serve metrics", e
         );
     }
-    let _ = dest.shutdown(net::Shutdown::Write);
-    Ok(())
+    if let Err(e)  = dest.shutdown(net::Shutdown::Write) {
+        error!(
+            logger,
+            "failure to shut down {:?}", e
+        );
+    }
 }
 
 /// Runs the metric server on the address and port set in config
@@ -84,7 +99,7 @@ pub fn run_metrics(conf: MetricsConfig, logger: &slog::Logger) -> Result<(), std
             Ok(conn) => {
                 let log_metrics = logger.new(slog::o!("component"=>"serve_metrics"));
                 thread::spawn(move || {
-                    let _ = serve_metrics(conn, log_metrics);
+                    serve_metrics(conn, log_metrics);
                 });
             }
             Err(err) => return Err(err),

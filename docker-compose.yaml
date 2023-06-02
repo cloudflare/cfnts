@@ -27,8 +27,3 @@ services:
     volumes:
       - ./scripts:/scripts
     entrypoint: ["/scripts/run_memcached.sh"]
-  clippy:
-    build:
-      context: .
-      dockerfile: Dockerfile.clippy
-    command: ["--all-features", "--", "-D", "warnings"]

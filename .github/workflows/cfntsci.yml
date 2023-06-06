@@ -30,7 +30,8 @@ jobs:
         run: cargo build --release
       - name: Testing
         run: cargo test -- --nocapture
-  e2e:
+
+  E2E:
     runs-on: ubuntu-latest
     steps:
       - name: Checking out

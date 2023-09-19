@@ -44,9 +44,9 @@ checksum = "6f1072d8f55592084072d2d3cb23a4b680a8543c00f10d446118e85ad3718142"
 
 [[package]]
 name = "arc-swap"
-version = "0.4.4"
+version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d7b8a9123b8027467bce0099fe556c628a53c8d83df0507084c31e9ba2e39aff"
+checksum = "dabe5a181f83789739c194cbe5a897dde195078fac08568d09221fd6137a7ba8"
 
 [[package]]
 name = "argon2rs"

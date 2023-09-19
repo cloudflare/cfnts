@@ -843,9 +843,9 @@ dependencies = [
 
 [[package]]
 name = "protobuf"
-version = "2.4.2"
+version = "2.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "524d165d95627ddebba768db728216c4429bbb62882f7e6ab1a6c3c54a7ed830"
+checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "quick-error"

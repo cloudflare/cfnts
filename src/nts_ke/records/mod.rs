@@ -9,8 +9,6 @@ mod end_of_message;
 mod error;
 mod new_cookie;
 mod next_protocol;
-mod port;
-mod server;
 mod warning;
 
 // We pub use everything in the submodules. You can limit the scope of usage by putting it the
@@ -20,8 +18,6 @@ pub use self::end_of_message::*;
 pub use self::error::*;
 pub use self::new_cookie::*;
 pub use self::next_protocol::*;
-pub use self::port::*;
-pub use self::server::*;
 pub use self::warning::*;
 
 use rustls::Error as TLSError;
@@ -42,14 +38,11 @@ pub enum KeRecord {
     Warning(WarningRecord),
     AeadAlgorithm(AeadAlgorithmRecord),
     NewCookie(NewCookieRecord),
-    Server(ServerRecord),
-    Port(PortRecord),
 }
 
 #[derive(Clone, Copy)]
 pub enum Party {
     Client,
-    Server,
 }
 
 pub trait KeRecordTrait: Sized {
@@ -142,9 +135,7 @@ pub fn deserialize(sender: Party, bytes: &[u8]) -> Result<KeRecord, DeserializeE
         (Error, ErrorRecord),
         (Warning, WarningRecord),
         (AeadAlgorithm, AeadAlgorithmRecord),
-        (NewCookie, NewCookieRecord),
-        (Server, ServerRecord),
-        (Port, PortRecord)
+        (NewCookie, NewCookieRecord)
     );
 
     Ok(record)
@@ -244,8 +235,6 @@ pub fn process_record(
                 .collect();
         }
         KeRecord::NewCookie(record) => state.cookies.push(record.into_bytes()),
-        KeRecord::Server(record) => state.next_server = Some(record.into_string()),
-        KeRecord::Port(record) => state.next_port = Some(record.port()),
     }
 
     Ok(())

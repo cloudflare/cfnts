@@ -18,6 +18,3 @@ webpki-roots = "0.26.0"
 tokio = { version = "1.10.1", features = ["full"] }
 tokio-rustls = "0.25"
 trust-dns-resolver = { version = "0.23.2", features = ["tokio"] }
-
-[dev-dependencies]
-env_logger = "*"

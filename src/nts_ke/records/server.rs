@@ -38,7 +38,6 @@ impl KeRecordTrait for ServerRecord {
     fn critical(&self) -> bool {
         match self.sender {
             Party::Client => false,
-            Party::Server => true,
         }
     }
 

@@ -1,4 +1,0 @@
-FROM debian:bookworm
-
-RUN apt-get update && \
-    apt-get -y install memcached python3-memcache

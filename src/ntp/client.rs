@@ -1,9 +1,8 @@
 use crate::nts_ke::client::NtsKeResult;
 
-use miscreant::aead::Aead;
-use miscreant::aead::Aes128SivAead;
-use rand::Rng;
+use aes_siv::{Aes128SivAead, KeyInit};
 use log::debug;
+use rand::Rng;
 use std::error::Error;
 use std::fmt;
 
@@ -102,8 +101,8 @@ pub fn run_nts_ntp_client(state: NtsKeResult) -> Result<NtpResult, Box<dyn Error
     let socket = socket.unwrap();
     socket.set_read_timeout(Some(TIMEOUT))?;
     socket.set_write_timeout(Some(TIMEOUT))?;
-    let mut send_aead = Aes128SivAead::new(&state.keys.c2s);
-    let mut recv_aead = Aes128SivAead::new(&state.keys.s2c);
+    let mut send_aead = Aes128SivAead::new((&state.keys.c2s).into());
+    let mut recv_aead = Aes128SivAead::new((&state.keys.s2c).into());
     let header = NtpPacketHeader {
         leap_indicator: LeapState::NoLeap,
         version: 4,

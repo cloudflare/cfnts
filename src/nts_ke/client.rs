@@ -1,10 +1,11 @@
+use anyhow::{bail, Result};
+
 use log::debug;
 use std::convert::TryFrom;
-use std::error::Error;
-use std::io::{Read, Write};
-use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
-use std::time::Duration;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+use tokio::net::TcpStream;
 
 use rustls;
 use webpki_roots;
@@ -44,7 +45,6 @@ type Cookie = Vec<u8>;
 const DEFAULT_NTP_PORT: u16 = 123;
 const DEFAULT_KE_PORT: u16 = 4460;
 const DEFAULT_SCHEME: u16 = 0;
-const TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug)]
 pub struct ClientConfig {
@@ -65,7 +65,7 @@ pub struct NtsKeResult {
 }
 
 /// run_nts_client executes the nts client with the config in config file
-pub fn run_nts_ke_client(client_config: ClientConfig) -> Result<NtsKeResult, Box<dyn Error>> {
+pub async fn run_nts_ke_client(client_config: ClientConfig) -> Result<NtsKeResult> {
     let alpn_proto = String::from("ntske/1");
     let alpn_bytes = alpn_proto.into_bytes();
     let mut root_store = rustls::RootCertStore::empty();
@@ -76,33 +76,30 @@ pub fn run_nts_ke_client(client_config: ClientConfig) -> Result<NtsKeResult, Box
     tls_config.alpn_protocols = vec![alpn_bytes];
 
     let rc_config = Arc::new(tls_config);
-    let hostname = rustls::pki_types::ServerName::try_from(client_config.host.as_str())
-        .expect("server hostname is invalid");
-    let mut client =
-        rustls::ClientConnection::new(rc_config, hostname.to_owned()).expect("Failed to connect");
     debug!("Connecting");
     let port = client_config.port.unwrap_or(DEFAULT_KE_PORT);
 
-    let mut ip_addrs = (client_config.host.as_str(), port).to_socket_addrs()?;
+    let ip_addrs = crate::dns_resolver::resolve_addrs(client_config.host.as_str()).await?;
     let addr;
     if client_config.use_ipv6 {
         // mandated to use ipv6
-        addr = ip_addrs.find(|&x| x.is_ipv6());
-        if addr.is_none() {
-            return Err(Box::new(NtsKeParseError::NoIpv6AddrFound));
-        }
+        addr = match ip_addrs.iter().find(|&x| x.is_ipv6()) {
+            Some(addr) => addr,
+            None => return Err(NtsKeParseError::NoIpv6AddrFound.into()),
+        };
     } else {
         // mandated to use ipv4
-        addr = ip_addrs.find(|&x| x.is_ipv4());
-        if addr.is_none() {
-            return Err(Box::new(NtsKeParseError::NoIpv4AddrFound));
-        }
+        addr = match ip_addrs.iter().find(|&x| x.is_ipv4()) {
+            Some(addr) => addr,
+            None => return Err(NtsKeParseError::NoIpv4AddrFound.into()),
+        };
     }
-    let mut stream = TcpStream::connect_timeout(&addr.unwrap(), TIMEOUT)?;
-    stream.set_read_timeout(Some(TIMEOUT))?;
-    stream.set_write_timeout(Some(TIMEOUT))?;
-
-    let mut tls_stream = rustls::Stream::new(&mut client, &mut stream);
+    let stream = TcpStream::connect((addr.clone(), port)).await?;
+    let tls_connector = tokio_rustls::TlsConnector::from(rc_config);
+    let hostname = rustls::pki_types::ServerName::try_from(client_config.host.as_str())
+        .expect("server hostname is invalid")
+        .to_owned();
+    let mut tls_stream = tls_connector.connect(hostname, stream).await?;
 
     let next_protocol_record = NextProtocolRecord::from(vec![KnownNextProtocol::Ntpv4]);
     let aead_record = AeadAlgorithmRecord::from(vec![KnownAeadAlgorithm::AeadAesSivCmac256]);
@@ -111,10 +108,12 @@ pub fn run_nts_ke_client(client_config: ClientConfig) -> Result<NtsKeResult, Box
     let clientrec = &mut serialize(next_protocol_record);
     clientrec.append(&mut serialize(aead_record));
     clientrec.append(&mut serialize(end_record));
-    tls_stream.write_all(clientrec)?;
-    tls_stream.flush()?;
+
+    tls_stream.write_all(clientrec).await?;
+    tls_stream.flush().await?;
+
     debug!("Request transmitted");
-    let keys = records::gen_key(tls_stream.conn).unwrap();
+    let keys = records::gen_key(&tls_stream.get_ref().1).unwrap();
 
     let mut state = ReceivedNtsKeRecordState {
         finished: false,
@@ -130,18 +129,13 @@ pub fn run_nts_ke_client(client_config: ClientConfig) -> Result<NtsKeResult, Box
 
         // We should use `read_exact` here because we always need to read 4 bytes to get the
         // header.
-        if let Err(error) = tls_stream.read_exact(&mut header[..]) {
-            return Err(Box::new(error));
-        }
+        tls_stream.read_exact(&mut header[..]).await?;
 
         // Retrieve a body length from the 3rd and 4th bytes of the header.
         let body_length = u16::from_be_bytes([header[2], header[3]]);
         let mut body = vec![0; body_length as usize];
 
-        // `read_exact` the length of the body.
-        if let Err(error) = tls_stream.read_exact(body.as_mut_slice()) {
-            return Err(Box::new(error));
-        }
+        tls_stream.read_exact(body.as_mut_slice()).await?;
 
         // Reconstruct the whole record byte array to let the `records` module deserialize it.
         let mut record_bytes = Vec::from(&header[..]);
@@ -152,38 +146,24 @@ pub fn run_nts_ke_client(client_config: ClientConfig) -> Result<NtsKeResult, Box
         // length field.
         match deserialize(Party::Client, record_bytes.as_slice()) {
             Ok(record) => {
-                let status = process_record(record, &mut state);
-                match status {
-                    Ok(_) => {}
-                    Err(err) => {
-                        return Err(err);
-                    }
-                }
+                process_record(record, &mut state)?;
             }
             Err(DeserializeError::UnknownNotCriticalRecord) => {
                 // If it's not critical, just ignore the error.
                 debug!("unknown record type");
             }
             Err(DeserializeError::UnknownCriticalRecord) => {
-                // TODO: This should propertly handled by sending an Error record.
                 debug!("error: unknown critical record");
-                return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "unknown critical record",
-                )));
+                bail!("unknown critical record");
             }
             Err(DeserializeError::Parsing(error)) => {
-                // TODO: This shouldn't be wrapped as a trait object.
                 debug!("error: {}", error);
-                return Err(Box::new(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    error,
-                )));
+                bail!("parse error: {}", error);
             }
         }
     }
     debug!("saw the end of the response");
-    stream.shutdown(Shutdown::Write)?;
+    tls_stream.shutdown().await?;
 
     let aead_scheme = if state.aead_scheme.is_empty() {
         DEFAULT_SCHEME

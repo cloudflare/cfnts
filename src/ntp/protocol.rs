@@ -388,7 +388,7 @@ mod tests {
     use aes_siv::{Aes128SivAead, KeyInit as _};
     #[test]
     fn test_ntp_header_parse() {
-        let leaps = vec![NoLeap, Positive, Negative, Unknown];
+        let leaps = vec![NoLeap, Positive, Negative, LeapState::Unknown];
         let versions = vec![1, 2, 3, 4, 5, 6, 7];
         let modes = vec![SymmetricActive, SymmetricPassive, Client, Server, Broadcast];
         for leap in &leaps {

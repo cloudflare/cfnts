@@ -220,9 +220,9 @@ impl fmt::Display for NtsKeParseError {
 pub fn process_record(
     record: KeRecord,
     state: &mut ReceivedNtsKeRecordState,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), NtsKeParseError> {
     if state.finished {
-        return Err(Box::new(NtsKeParseError::RecordAfterEnd));
+        return Err(NtsKeParseError::RecordAfterEnd);
     }
 
     match record {
@@ -234,7 +234,7 @@ pub fn process_record(
                 .map(|protocol| protocol.as_protocol_id())
                 .collect();
         }
-        KeRecord::Error(_) => return Err(Box::new(NtsKeParseError::ErrorRecord)),
+        KeRecord::Error(_) => return Err(NtsKeParseError::ErrorRecord),
         KeRecord::Warning(_) => return Ok(()),
         KeRecord::AeadAlgorithm(record) => {
             state.aead_scheme = record

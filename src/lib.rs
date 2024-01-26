@@ -6,12 +6,13 @@ mod client;
 mod cookie;
 mod ntp;
 mod nts_ke;
+mod dns_resolver;
 
 pub use client::nts_get;
 
-#[test]
-fn it_works() {
+#[tokio::test]
+async fn it_works() {
     env_logger::init();
-    let result = nts_get("time.cloudflare.com", None, false).unwrap();
+    let result = nts_get("time.cloudflare.com", None, false).await.unwrap();
     println!("result: {:?}", result);
 }

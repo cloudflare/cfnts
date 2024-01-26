@@ -4,20 +4,20 @@
 
 //! The client subcommand.
 
-use std::error::Error;
+use anyhow::Result;
 
 use log::debug;
 
 use crate::ntp::client::{run_nts_ntp_client, NtpResult};
 use crate::nts_ke::client::{run_nts_ke_client, ClientConfig};
 
-pub fn nts_get(host: &str, port: Option<u16>, use_ipv6: bool) -> Result<NtpResult, Box<dyn Error>> {
+pub async fn nts_get(host: &str, port: Option<u16>, use_ipv6: bool) -> Result<NtpResult> {
     let config = ClientConfig {
         host: host.into(),
         port,
         use_ipv6,
     };
-    let state = run_nts_ke_client(config)?;
+    let state = run_nts_ke_client(config).await?;
     debug!("running UDP client with state {:x?}", state);
-    run_nts_ntp_client(state)
+    run_nts_ntp_client(state).await
 }

@@ -21,3 +21,9 @@ pub async fn nts_get(host: &str, port: Option<u16>, use_ipv6: bool) -> Result<Nt
     debug!("running UDP client with state {:x?}", state);
     run_nts_ntp_client(state).await
 }
+
+#[tokio::test]
+async fn it_works() {
+    let result = nts_get("time.cloudflare.com", None, false).await.unwrap();
+    assert!(result.time_diff < 10.);
+}

@@ -345,7 +345,7 @@ pub fn serialize_nts_packet<T: AeadInPlace<NonceSize = U16>>(
     let plaintext = serialize_extensions(packet.auth_enc_exts);
     let mut nonce = [0u8; U16::USIZE];
     rand::thread_rng().fill(&mut nonce);
-    let mut buffer = Vec::from(plaintext);
+    let mut buffer = plaintext;
     encryptor
         .encrypt_in_place((&nonce).into(), buff.get_ref(), &mut buffer)
         .expect("Encryption failed, failed to serialize NtsPacket");

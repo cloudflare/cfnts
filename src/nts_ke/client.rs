@@ -80,21 +80,20 @@ pub async fn run_nts_ke_client(client_config: ClientConfig) -> Result<NtsKeResul
     let port = client_config.port.unwrap_or(DEFAULT_KE_PORT);
 
     let ip_addrs = crate::dns_resolver::resolve_addrs(client_config.host.as_str()).await?;
-    let addr;
-    if client_config.use_ipv6 {
+    let addr = if client_config.use_ipv6 {
         // mandated to use ipv6
-        addr = match ip_addrs.iter().find(|&x| x.is_ipv6()) {
+        match ip_addrs.iter().find(|&x| x.is_ipv6()) {
             Some(addr) => addr,
             None => return Err(NtsKeParseError::NoIpv6AddrFound.into()),
-        };
+        }
     } else {
         // mandated to use ipv4
-        addr = match ip_addrs.iter().find(|&x| x.is_ipv4()) {
+        match ip_addrs.iter().find(|&x| x.is_ipv4()) {
             Some(addr) => addr,
             None => return Err(NtsKeParseError::NoIpv4AddrFound.into()),
-        };
-    }
-    let stream = TcpStream::connect((addr.clone(), port)).await?;
+        }
+    };
+    let stream = TcpStream::connect((*addr, port)).await?;
     let tls_connector = tokio_rustls::TlsConnector::from(rc_config);
     let hostname = rustls::pki_types::ServerName::try_from(client_config.host.as_str())
         .expect("server hostname is invalid")
@@ -113,7 +112,7 @@ pub async fn run_nts_ke_client(client_config: ClientConfig) -> Result<NtsKeResul
     tls_stream.flush().await?;
 
     debug!("Request transmitted");
-    let keys = records::gen_key(&tls_stream.get_ref().1).unwrap();
+    let keys = records::gen_key(tls_stream.get_ref().1).unwrap();
 
     let mut state = ReceivedNtsKeRecordState {
         finished: false,

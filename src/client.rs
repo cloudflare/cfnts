@@ -4,7 +4,7 @@
 
 //! The client subcommand.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use log::debug;
 
@@ -17,9 +17,13 @@ pub async fn nts_get(host: &str, port: Option<u16>, use_ipv6: bool) -> Result<Nt
         port,
         use_ipv6,
     };
-    let state = run_nts_ke_client(config).await?;
-    debug!("running UDP client with state {:x?}", state);
-    run_nts_ntp_client(state).await
+    let state = run_nts_ke_client(config)
+        .await
+        .context("failed to handshake")?;
+    debug!("handshake fine");
+    run_nts_ntp_client(state)
+        .await
+        .context("failed to get time")
 }
 
 #[tokio::test]

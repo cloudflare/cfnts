@@ -10,9 +10,7 @@ use self::NtpExtensionType::*;
 use self::PacketMode::*;
 
 /// These numbers are from RFC 5905
-pub const VERSION: u8 = 4;
 pub const UNIX_OFFSET: u64 = 2_208_988_800;
-pub const PHI: f64 = 15e-6;
 /// TWO_POW_32 is a floating point power of two (2**32)
 pub const TWO_POW_32: f64 = 4294967296.0;
 
@@ -218,13 +216,6 @@ pub fn serialize_header(head: NtpPacketHeader) -> Vec<u8> {
     buff.into_inner()
 }
 
-/// parse_ntp_packet parses an NTP packet
-pub fn parse_ntp_packet(buff: &[u8]) -> Result<NtpPacket, std::io::Error> {
-    let header = parse_packet_header(buff)?;
-    let exts = parse_extensions(&buff[48..])?;
-    Ok(NtpPacket { header, exts })
-}
-
 /// Properly parsing NTP extensions in accordance with RFC 7822 is not necessary
 /// since the legacy MAC will never be used by this code.
 fn parse_extensions(buff: &[u8]) -> Result<Vec<NtpExtension>, std::io::Error> {
@@ -252,16 +243,6 @@ fn parse_extensions(buff: &[u8]) -> Result<Vec<NtpExtension>, std::io::Error> {
     Ok(retval)
 }
 
-/// serialize_ntp_packet returns the packet in wire format.
-pub fn serialize_ntp_packet(pack: NtpPacket) -> Vec<u8> {
-    let mut buff = Cursor::new(Vec::new());
-    buff.write_all(&serialize_header(pack.header))
-        .expect("buffer write failed; can't serialize NtpPacket");
-    buff.write_all(&serialize_extensions(pack.exts))
-        .expect("buffer write failed; can't serialize NtpPacket");
-    buff.into_inner()
-}
-
 fn serialize_extensions(exts: Vec<NtpExtension>) -> Vec<u8> {
     let mut buff = Cursor::new(Vec::new());
     for ext in exts {
@@ -276,30 +257,6 @@ fn serialize_extensions(exts: Vec<NtpExtension>) -> Vec<u8> {
             .expect("buffer write failed; can't serialize Ntp Extensions");
     }
     buff.into_inner()
-}
-
-/// has_extension returns true if the packet has an extension of the right kind
-pub fn has_extension(pack: &NtpPacket, kind: NtpExtensionType) -> bool {
-    pack.exts
-        .clone()
-        .into_iter()
-        .any(|ext| ext.ext_type == kind)
-}
-
-/// is_nts_packet returns true if this packet is plausibly an NTS packet.
-/// TODO: enforce rules tighter about uniqueness of some of these extensions.
-pub fn is_nts_packet(pack: &NtpPacket) -> bool {
-    has_extension(pack, NTSCookie)
-        && has_extension(pack, NTSAuthenticator)
-        && has_extension(pack, UniqueIdentifier)
-}
-
-/// extract_extension retrieves the extension if it exists, and else none.
-pub fn extract_extension(pack: &NtpPacket, kind: NtpExtensionType) -> Option<NtpExtension> {
-    pack.exts
-        .clone()
-        .into_iter()
-        .find(|ext| ext.ext_type == kind)
 }
 
 /// parse_nts_packet parses an NTS packet.

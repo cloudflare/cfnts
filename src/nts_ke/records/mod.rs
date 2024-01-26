@@ -27,7 +27,12 @@ pub use self::warning::*;
 use rustls::TLSError;
 use std::fmt;
 
-use crate::cookie::NTSKeys;
+#[derive(Debug, Copy, Clone)]
+pub struct NTSKeys {
+    pub c2s: [u8; 32],
+    pub s2c: [u8; 32],
+}
+
 
 pub const HEADER_SIZE: usize = 4;
 

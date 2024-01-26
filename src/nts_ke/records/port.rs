@@ -14,10 +14,6 @@ pub struct PortRecord {
 }
 
 impl PortRecord {
-    pub fn new(sender: Party, port: u16) -> PortRecord {
-        PortRecord { sender, port }
-    }
-
     pub fn port(&self) -> u16 {
         self.port
     }

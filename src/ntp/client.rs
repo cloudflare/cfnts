@@ -3,7 +3,7 @@ use crate::nts_ke::client::NtsKeResult;
 use miscreant::aead::Aead;
 use miscreant::aead::Aes128SivAead;
 use rand::Rng;
-use slog::debug;
+use log::debug;
 use std::error::Error;
 use std::fmt;
 
@@ -79,39 +79,25 @@ fn timestamp_to_float(time: u64) -> f64 {
 }
 
 /// Run the NTS client with the given data from key exchange
-pub fn run_nts_ntp_client(
-    logger: &slog::Logger,
-    state: NtsKeResult,
-) -> Result<NtpResult, Box<dyn Error>> {
+pub fn run_nts_ntp_client(state: NtsKeResult) -> Result<NtpResult, Box<dyn Error>> {
     let mut ip_addrs = (state.next_server.as_str(), state.next_port).to_socket_addrs()?;
     let addr;
     let socket;
-    if let Some(use_ipv4) = state.use_ipv4 {
-        if use_ipv4 {
-            // mandated to use ipv4
-            addr = ip_addrs.find(|&x| x.is_ipv4());
-            if addr.is_none() {
-                return Err(Box::new(NoIpv4AddrFound));
-            }
-            socket = UdpSocket::bind("0.0.0.0:0");
-        } else {
-            // mandated to use ipv6
-            addr = ip_addrs.find(|&x| x.is_ipv6());
-            if addr.is_none() {
-                return Err(Box::new(NoIpv6AddrFound));
-            }
-            socket = UdpSocket::bind("[::]:0");
+    if state.use_ipv6 {
+        // mandated to use ipv6
+        addr = ip_addrs.find(|&x| x.is_ipv6());
+        if addr.is_none() {
+            return Err(Box::new(NoIpv6AddrFound));
         }
+        socket = UdpSocket::bind("[::]:0");
     } else {
-        // sniff whichever one is supported
-        addr = ip_addrs.next();
-        // check if this address is ipv4 or ipv6
-        if addr.unwrap().is_ipv6() {
-            socket = UdpSocket::bind("[::]:0");
-        } else {
-            socket = UdpSocket::bind("0.0.0.0:0");
+        // mandated to use ipv4
+        addr = ip_addrs.find(|&x| x.is_ipv4());
+        if addr.is_none() {
+            return Err(Box::new(NoIpv4AddrFound));
         }
-    }
+        socket = UdpSocket::bind("0.0.0.0:0");
+    };
 
     let socket = socket.unwrap();
     socket.set_read_timeout(Some(TIMEOUT))?;
@@ -154,11 +140,11 @@ pub fn run_nts_ntp_client(
     let wire_packet = &serialize_nts_packet::<Aes128SivAead>(packet, &mut send_aead);
     let t1 = system_to_ntpfloat(SystemTime::now());
     socket.send(wire_packet)?;
-    debug!(logger, "transmitting packet");
+    debug!("transmitting packet");
     let mut buff = [0; BUFF_SIZE];
     let (size, _origin) = socket.recv_from(&mut buff)?;
     let t4 = system_to_ntpfloat(SystemTime::now());
-    debug!(logger, "received packet");
+    debug!("received packet");
     let received = parse_nts_packet::<Aes128SivAead>(&buff[0..size], &mut recv_aead);
     match received {
         Err(x) => Err(Box::new(x)),

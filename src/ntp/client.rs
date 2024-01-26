@@ -29,6 +29,8 @@ const TIMEOUT: Duration = Duration::from_secs(10);
 pub struct NtpResult {
     pub stratum: u8,
     pub time_diff: f64,
+    pub receive_timestamp: f64,
+    pub transmit_timestamp: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -155,11 +157,13 @@ pub fn run_nts_ntp_client(state: NtsKeResult) -> Result<NtpResult, Box<dyn Error
                 return Err(Box::new(InvalidUid));
             }
 
+            let receive_timestamp = timestamp_to_float(packet.header.receive_timestamp);
+            let transmit_timestamp = timestamp_to_float(packet.header.transmit_timestamp);
             Ok(NtpResult {
                 stratum: packet.header.stratum,
-                time_diff: ((timestamp_to_float(packet.header.receive_timestamp) - t1)
-                    + (timestamp_to_float(packet.header.transmit_timestamp) - t4))
-                    / 2.0,
+                time_diff: ((receive_timestamp - t1) + (transmit_timestamp - t4)) / 2.0,
+                receive_timestamp,
+                transmit_timestamp,
             })
         }
     }

@@ -24,7 +24,7 @@ pub use self::port::*;
 pub use self::server::*;
 pub use self::warning::*;
 
-use rustls::TLSError;
+use rustls::Error as TLSError;
 use std::fmt;
 
 #[derive(Debug, Copy, Clone)]
@@ -32,7 +32,6 @@ pub struct NTSKeys {
     pub c2s: [u8; 32],
     pub s2c: [u8; 32],
 }
-
 
 pub const HEADER_SIZE: usize = 4;
 
@@ -153,7 +152,7 @@ pub fn deserialize(sender: Party, bytes: &[u8]) -> Result<KeRecord, DeserializeE
 
 /// gen_key computes the client and server keys using exporters.
 /// https://tools.ietf.org/html/draft-ietf-ntp-using-nts-for-ntp-28#section-4.3
-pub fn gen_key<T: rustls::Session>(session: &T) -> Result<NTSKeys, TLSError> {
+pub fn gen_key<T>(session: &rustls::ConnectionCommon<T>) -> Result<NTSKeys, TLSError> {
     let mut keys: NTSKeys = NTSKeys {
         c2s: [0; 32],
         s2c: [0; 32],

@@ -385,7 +385,7 @@ pub fn serialize_nts_packet<T: AeadInPlace<NonceSize = U16>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use aes_siv::Aes128SivAead;
+    use aes_siv::{Aes128SivAead, KeyInit as _};
     #[test]
     fn test_ntp_header_parse() {
         let leaps = vec![NoLeap, Positive, Negative, Unknown];
@@ -449,7 +449,7 @@ mod tests {
     #[test]
     fn test_nts_parse() {
         let key = [0; 32];
-        let mut test_aead = Aes128SivAead::new(&key);
+        let mut test_aead = Aes128SivAead::new((&key).into());
         let header = NtpPacketHeader {
             leap_indicator: NoLeap,
             version: 4,

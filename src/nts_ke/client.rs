@@ -1,4 +1,5 @@
 use log::debug;
+use std::convert::TryFrom;
 use std::error::Error;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
@@ -6,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use rustls;
-use webpki;
 use webpki_roots;
 
 use super::records;
@@ -66,19 +66,20 @@ pub struct NtsKeResult {
 
 /// run_nts_client executes the nts client with the config in config file
 pub fn run_nts_ke_client(client_config: ClientConfig) -> Result<NtsKeResult, Box<dyn Error>> {
-    let mut tls_config = rustls::ClientConfig::new();
     let alpn_proto = String::from("ntske/1");
     let alpn_bytes = alpn_proto.into_bytes();
-    tls_config.set_protocols(&[alpn_bytes]);
-
-    tls_config
-        .root_store
-        .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+    let mut root_store = rustls::RootCertStore::empty();
+    root_store.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let mut tls_config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    tls_config.alpn_protocols = vec![alpn_bytes];
 
     let rc_config = Arc::new(tls_config);
-    let hostname = webpki::DNSNameRef::try_from_ascii_str(client_config.host.as_str())
+    let hostname = rustls::pki_types::ServerName::try_from(client_config.host.as_str())
         .expect("server hostname is invalid");
-    let mut client = rustls::ClientSession::new(&rc_config, hostname);
+    let mut client =
+        rustls::ClientConnection::new(rc_config, hostname.to_owned()).expect("Failed to connect");
     debug!("Connecting");
     let port = client_config.port.unwrap_or(DEFAULT_KE_PORT);
 
@@ -113,7 +114,7 @@ pub fn run_nts_ke_client(client_config: ClientConfig) -> Result<NtsKeResult, Box
     tls_stream.write_all(clientrec)?;
     tls_stream.flush()?;
     debug!("Request transmitted");
-    let keys = records::gen_key(tls_stream.sess).unwrap();
+    let keys = records::gen_key(tls_stream.conn).unwrap();
 
     let mut state = ReceivedNtsKeRecordState {
         finished: false,

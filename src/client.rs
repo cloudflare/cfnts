@@ -11,13 +11,9 @@ use log::debug;
 use crate::ntp::client::{run_nts_ntp_client, NtpResult};
 use crate::nts_ke::client::{run_nts_ke_client, ClientConfig};
 
-pub fn nts_get(
-    host: String,
-    port: Option<u16>,
-    use_ipv6: bool,
-) -> Result<NtpResult, Box<dyn Error>> {
+pub fn nts_get(host: &str, port: Option<u16>, use_ipv6: bool) -> Result<NtpResult, Box<dyn Error>> {
     let config = ClientConfig {
-        host,
+        host: host.into(),
         port,
         use_ipv6,
     };

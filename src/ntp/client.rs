@@ -25,6 +25,7 @@ use self::NtpClientError::*;
 const BUFF_SIZE: usize = 2048;
 const TIMEOUT: Duration = Duration::from_secs(10);
 
+#[derive(Debug)]
 pub struct NtpResult {
     pub stratum: u8,
     pub time_diff: f64,

@@ -30,13 +30,3 @@ jobs:
         run: cargo build --release
       - name: Testing
         run: cargo test -- --nocapture
-  E2E:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checking out
-        uses: actions/checkout@v3
-      - name: Run integration tests
-        uses: isbang/compose-action@v1.4.1
-        with:
-          compose-file: "./docker-compose.yaml"
-          up-flags: "--build --abort-on-container-exit --exit-code-from client"

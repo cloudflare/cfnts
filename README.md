@@ -1,5 +1,8 @@
 # cfnts
 
+## DEPRECATION NOTICE
+**This software is no longer maintained. Consider using an alternative NTS implementation such as [chrony](https://chrony-project.org) or [ntpd-rs](https://github.com/pendulum-project/ntpd-rs).**
+
 cfnts is an implementation of the NTS protocol written in Rust.
 
 **Prereqs**:

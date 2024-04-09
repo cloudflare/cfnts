@@ -1,0 +1,13 @@
+{
+  "signing": {
+    "default": {
+      "expiry": "876000h",
+      "usages": [
+        "digital signature",
+        "cert sign",
+        "crl sign",
+        "signing"
+      ]
+    }
+  }
+}
